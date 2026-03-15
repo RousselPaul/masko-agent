@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -69,6 +70,10 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                     .foregroundColor(Constants.orangePrimary)
                 }
+
+                Text("Claude Code uses this hook server. Codex session tracking reads from ~/.codex/sessions and continues working without the local server.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Constants.textMuted)
             } header: {
                 Text("Connection").font(Constants.heading(size: 13, weight: .semibold))
             }
@@ -99,7 +104,7 @@ struct SettingsView: View {
                         .foregroundColor(.red)
                 }
             } header: {
-                Text("Claude Code").font(Constants.heading(size: 13, weight: .semibold))
+                Text("Claude Code Hooks").font(Constants.heading(size: 13, weight: .semibold))
             }
 
             Section {
@@ -208,7 +213,7 @@ struct SettingsView: View {
                         .buttonStyle(.plain)
                     }
                 } else if ideStatuses.contains(where: { $0.isDetected }) {
-                    Text("Install the extension to jump to the exact terminal tab running Claude Code.")
+                    Text("Install the extension to jump to the exact terminal tab running Claude Code or Codex.")
                         .font(.system(size: 11))
                         .foregroundColor(Constants.textMuted)
                 }
@@ -270,6 +275,47 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("Storage").font(Constants.heading(size: 13, weight: .semibold))
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Codex Sessions")
+                        .font(Constants.heading(size: 13, weight: .semibold))
+                        .foregroundColor(Constants.textPrimary)
+                    Text("Masko watches ~/.codex/sessions for Codex CLI/VSCode activity alongside Claude Code.")
+                        .font(Constants.body(size: 12))
+                        .foregroundColor(Constants.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Text("Detected slots")
+                            .foregroundColor(Constants.textPrimary)
+                        Spacer()
+                        Text("\(appStore.codexSessionCount)")
+                            .foregroundColor(Constants.textMuted)
+                    }
+                    if let last = appStore.codexLastEventAt {
+                        HStack {
+                            Text("Last event")
+                                .foregroundColor(Constants.textPrimary)
+                            Spacer()
+                            Text(last, style: .relative)
+                                .foregroundColor(Constants.textMuted)
+                        }
+                    }
+                }
+                Button(action: {
+                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: appStore.codexSessionsDirectory.path)
+                }) {
+                    HStack {
+                        Text("打开 ~/.codex/sessions")
+                        Spacer()
+                        Image(systemName: "folder")
+                    }
+                    .foregroundColor(Constants.orangePrimary)
+                }
+                .buttonStyle(.plain)
+            } header: {
+                Text("Codex").font(Constants.heading(size: 13, weight: .semibold))
             }
 
             Section {
@@ -338,7 +384,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
 
-                Text("Removes Claude Code hooks, local data, and quits the app.")
+                Text("Removes Claude Code hooks, local data, Codex session state, and quits the app.")
                     .font(.system(size: 11))
                     .foregroundColor(Constants.textMuted)
             } header: {
@@ -376,7 +422,7 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
             Button("Uninstall", role: .destructive) { performUninstall() }
         } message: {
-            Text("This will remove Claude Code hooks, delete all local data, and quit the app. You can reinstall anytime.")
+            Text("This will remove Claude Code hooks, delete all local data, clear Codex session state, and quit the app. You can reinstall anytime.")
         }
     }
 

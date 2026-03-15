@@ -228,7 +228,7 @@ private func markdownText(_ string: String) -> Text {
 /// Activate the terminal running the Claude Code session.
 /// Delegates to shared IDETerminalFocus utility (supports exact tab switching via IDE extension).
 /// Uses the session's stored projectDir (set at session start) to avoid issues when the agent has cd'd.
-private func focusTerminal(pid: Int? = nil, shellPid: Int? = nil, projectDir: String? = nil, sessionId: String? = nil, sessions: [ClaudeSession] = []) {
+private func focusTerminal(pid: Int? = nil, shellPid: Int? = nil, projectDir: String? = nil, sessionId: String? = nil, sessions: [AgentSession] = []) {
     let resolvedDir = sessions.first(where: { $0.id == sessionId })?.projectDir ?? projectDir
     IDETerminalFocus.focus(terminalPid: pid, shellPid: shellPid, projectDir: resolvedDir)
 }
@@ -1274,4 +1274,3 @@ struct DialogScalePreview: View {
         .shadow(color: OverlayStyle.cardShadow, radius: 3, x: 0, y: 2)
     }
 }
-

@@ -19,6 +19,24 @@ struct StatsOverlayView: View {
                 Text("\(sessionStore.activeSessions.count)")
             }
 
+            if sessionStore.runningClaudeSessionCount > 0 {
+                HStack(spacing: 3) {
+                    Text("C")
+                        .foregroundStyle(.orange)
+                    Text("\(sessionStore.runningClaudeSessionCount)")
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            if sessionStore.runningCodexSessionCount > 0 {
+                HStack(spacing: 3) {
+                    Text("O")
+                        .foregroundStyle(.blue)
+                    Text("\(sessionStore.runningCodexSessionCount)")
+                        .foregroundStyle(.blue)
+                }
+            }
+
             // Subagents (only if > 0)
             if sessionStore.totalActiveSubagents > 0 {
                 HStack(spacing: 3) {
@@ -70,6 +88,7 @@ struct StatsOverlayView: View {
         .background(Color.black.opacity(0.6))
         .clipShape(Capsule())
         .contentShape(Capsule())
+        .help("活跃会话: \(sessionStore.activeSessions.count)  正在运行 Claude: \(sessionStore.runningClaudeSessionCount)  正在运行 Codex: \(sessionStore.runningCodexSessionCount)")
         .onTapGesture {
             let active = sessionStore.activeSessions
             if active.count == 1, let session = active.first {

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SessionListView: View {
     @Environment(AppStore.self) var appStore
-    @State private var selectedSession: ClaudeSession?
+    @State private var selectedSession: AgentSession?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,7 +15,7 @@ struct SessionListView: View {
                     Text("No Sessions")
                         .font(Constants.heading(size: 22, weight: .semibold))
                         .foregroundColor(Constants.textPrimary)
-                    Text("Claude Code sessions will appear here when hooks are active")
+                    Text("Claude Code and Codex sessions will appear here when activity is detected")
                         .font(Constants.body(size: 14))
                         .foregroundColor(Constants.textMuted)
                     Spacer()
@@ -53,7 +53,7 @@ struct SessionListView: View {
 // MARK: - Session Row
 
 private struct SessionRow: View {
-    let session: ClaudeSession
+    let session: AgentSession
     let isSelected: Bool
     @State private var isHovered = false
     @State private var isFocusHovered = false
@@ -68,6 +68,9 @@ private struct SessionRow: View {
                 Text(session.projectName ?? "Unknown Project")
                     .font(Constants.heading(size: 14, weight: .semibold))
                     .foregroundColor(isSelected ? Constants.orangePrimary : Constants.textPrimary)
+                Text(session.agentSource.shortDisplayName)
+                    .font(Constants.body(size: 10, weight: .medium))
+                    .foregroundColor(Constants.textMuted)
                 HStack {
                     Text("\(session.eventCount) events")
                         .font(Constants.body(size: 11))
@@ -123,8 +126,8 @@ private struct SessionRow: View {
     }
 }
 
-extension ClaudeSession: Hashable {
-    static func == (lhs: ClaudeSession, rhs: ClaudeSession) -> Bool {
+extension AgentSession: Hashable {
+    static func == (lhs: AgentSession, rhs: AgentSession) -> Bool {
         lhs.id == rhs.id
     }
     func hash(into hasher: inout Hasher) {

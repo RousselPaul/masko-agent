@@ -46,7 +46,7 @@ struct ActivityFeedView: View {
                     Text("No Events")
                         .font(Constants.heading(size: 22, weight: .semibold))
                         .foregroundColor(Constants.textPrimary)
-                    Text("Claude Code hook events will appear here in real-time")
+                    Text("Claude Code and Codex activity will appear here in real-time")
                         .font(Constants.body(size: 14))
                         .foregroundColor(Constants.textMuted)
                     Spacer()
@@ -67,7 +67,7 @@ struct ActivityFeedView: View {
         .navigationTitle("Activity Feed")
     }
 
-    var filteredEvents: [ClaudeEvent] {
+    var filteredEvents: [AgentEvent] {
         appStore.eventStore.events
             .filter { event in
                 if let filterType { return event.eventType == filterType }
@@ -83,7 +83,7 @@ struct ActivityFeedView: View {
 }
 
 struct EventRow: View {
-    let event: ClaudeEvent
+    let event: AgentEvent
 
     var body: some View {
         HStack(spacing: 12) {
@@ -118,6 +118,9 @@ struct EventRow: View {
                             .font(Constants.body(size: 11))
                             .foregroundColor(Constants.textMuted)
                     }
+                    Text(event.agentSource.shortDisplayName)
+                        .font(Constants.body(size: 11, weight: .medium))
+                        .foregroundColor(Constants.textMuted)
                     Spacer()
                     Text(event.receivedAt, style: .relative)
                         .font(Constants.body(size: 11))

@@ -321,7 +321,7 @@ final class OverlayManager {
 
     /// Compute aggregate session state and push inputs to the state machine.
     /// Called after SessionStore.recordEvent() has already updated session phases.
-    func handleEvent(_ event: ClaudeEvent) {
+    func handleEvent(_ event: AgentEvent) {
         refreshInputs()
 
         // Fire granular event trigger (auto-resets after transition)
@@ -657,7 +657,12 @@ final class OverlayManager {
         }
         // Fall back to URL-based overlay (single video loop)
         guard let urlString = UserDefaults.standard.string(forKey: "overlay_url"),
-              let url = URL(string: urlString) else { return }
+              let url = URL(string: urlString) else {
+            if let fallback = Self.loadFallbackConfig() {
+                showOverlayWithConfig(fallback)
+            }
+            return
+        }
         showOverlay(url: url)
     }
 
@@ -1079,5 +1084,12 @@ final class OverlayManager {
             Task { @MainActor in self?.reassertPanel() }
         }
         workspaceObservers.append(appObserver)
+    }
+
+    private static func loadFallbackConfig() -> MaskoAnimationConfig? {
+        guard let url = Bundle.module.url(forResource: "masko", withExtension: "json", subdirectory: "Defaults"),
+              let data = try? Data(contentsOf: url),
+              let config = try? JSONDecoder().decode(MaskoAnimationConfig.self, from: data) else { return nil }
+        return config
     }
 }

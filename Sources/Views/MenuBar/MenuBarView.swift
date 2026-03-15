@@ -74,9 +74,13 @@ struct MenuBarView: View {
                                 Image(systemName: "terminal")
                                     .font(.caption)
                                     .foregroundColor(Constants.orangePrimary)
-                                Text(session.projectName ?? "Unknown")
-                                    .font(Constants.body(size: 12))
-                                    .foregroundColor(Constants.textPrimary)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(session.projectName ?? "Unknown")
+                                    Text(session.agentSource.shortDisplayName)
+                                        .font(Constants.body(size: 9))
+                                        .foregroundColor(Constants.textMuted)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                                 Spacer()
                                 Image(systemName: "arrow.up.forward")
                                     .font(.system(size: 9))
