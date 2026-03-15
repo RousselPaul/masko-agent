@@ -17,8 +17,11 @@ struct CodexSessionSnapshot {
 
 @MainActor
 final class CodexCLISessionMonitor {
+    private let freshnessWindow: TimeInterval = 1800
+
     private struct SessionFileState {
         var fileOffset: UInt64 = 0
+        var pendingData = Data()
         var sessionID: String?
         var source: AgentSource?
         var cwd: String?
@@ -86,13 +89,25 @@ final class CodexCLISessionMonitor {
         let data = handle.readDataToEndOfFile()
         state.fileOffset = size
 
-        guard !data.isEmpty else {
+        guard !data.isEmpty || !state.pendingData.isEmpty else {
             fileStates[file] = state
             return
         }
 
         let emitLiveEvents = hasCompletedInitialScan
-        let lines = String(decoding: data, as: UTF8.self).split(separator: "\n")
+        var combinedData = state.pendingData
+        combinedData.append(data)
+
+        guard let lastNewlineIndex = combinedData.lastIndex(of: 0x0A) else {
+            state.pendingData = combinedData
+            fileStates[file] = state
+            return
+        }
+
+        let completeData = combinedData.prefix(through: lastNewlineIndex)
+        state.pendingData = Data(combinedData.suffix(from: combinedData.index(after: lastNewlineIndex)))
+
+        let lines = String(decoding: completeData, as: UTF8.self).split(separator: "\n")
         for line in lines {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {
                 continue
@@ -189,7 +204,6 @@ final class CodexCLISessionMonitor {
     }
 
     private func publishInitialSnapshots() {
-        let freshnessWindow: TimeInterval = 1800
         let now = Date()
 
         for state in fileStates.values {
@@ -203,7 +217,7 @@ final class CodexCLISessionMonitor {
                 isRecent = false
             }
 
-            guard state.currentTurnID != nil || isRecent else { continue }
+            guard isRecent else { continue }
 
             delegate?.codexCLIMonitorDidLoadSnapshot(
                 CodexSessionSnapshot(
