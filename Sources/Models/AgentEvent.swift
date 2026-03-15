@@ -1,7 +1,7 @@
 import Foundation
 
-/// A single Claude Code hook event, decoded from the JSON that the hook script forwards
-struct ClaudeEvent: Identifiable, Codable {
+/// A single agent event, decoded from Claude hooks or synthesized from Codex sessions.
+struct AgentEvent: Identifiable, Codable {
     let id: UUID
     let hookEventName: String
     let sessionId: String?
@@ -53,6 +53,14 @@ struct ClaudeEvent: Identifiable, Codable {
 
     var eventType: HookEventType? {
         HookEventType(rawValue: hookEventName)
+    }
+
+    var agentSource: AgentSource {
+        AgentSource.fromEventSource(source)
+    }
+
+    var agentDisplayName: String {
+        agentSource.displayName
     }
 
     var projectName: String? {

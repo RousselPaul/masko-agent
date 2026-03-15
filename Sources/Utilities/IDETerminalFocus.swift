@@ -1,12 +1,12 @@
 import AppKit
 import Foundation
 
-/// Shared utility for focusing the terminal running a Claude Code session.
+/// Shared utility for focusing the terminal running an agent session.
 /// Attempts IDE extension URI first (exact tab), falls back to AppleScript app activation.
 enum IDETerminalFocus {
 
     /// Focus the terminal for a given session.
-    static func focusSession(_ session: ClaudeSession) {
+    static func focusSession(_ session: AgentSession) {
         focus(terminalPid: session.terminalPid, shellPid: session.shellPid, projectDir: session.projectDir)
     }
 

@@ -68,7 +68,7 @@ struct ParsedOption {
 
 struct PendingPermission: Identifiable {
     let id: UUID
-    let event: ClaudeEvent
+    let event: AgentEvent
     let connection: NWConnection
     let receivedAt: Date
     /// tool_use_id correlated from the preceding PreToolUse event
@@ -345,7 +345,7 @@ final class PendingPermissionStore {
     /// Permissions the user chose to defer ("Later") — hidden from overlay but connection stays open
     private(set) var collapsed: Set<UUID> = []
     /// Called when a permission is resolved — used to update notification outcome
-    var onResolved: ((ClaudeEvent, ResolutionOutcome) -> Void)?
+    var onResolved: ((AgentEvent, ResolutionOutcome) -> Void)?
     /// Called when pending permissions change — used to resize/reposition the overlay panel
     var onPendingChange: (() -> Void)?
     /// Secondary callback for pending changes — used by hotkey manager (avoids overwriting primary)
@@ -370,7 +370,7 @@ final class PendingPermissionStore {
         preToolUseCache[key] = toolUseId
     }
 
-    func add(event: ClaudeEvent, connection: NWConnection) {
+    func add(event: AgentEvent, connection: NWConnection) {
         // Correlate with preceding PreToolUse to recover tool_use_id
         // (PermissionRequest events from Claude Code don't include tool_use_id)
         var resolvedToolUseId = event.toolUseId

@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 
+@MainActor
 @Observable
 final class AppStore {
     let localServer = LocalServer()
@@ -13,6 +14,7 @@ final class AppStore {
     let hotkeyManager = GlobalHotkeyManager()
     let sessionSwitcherStore = SessionSwitcherStore()
     let sessionFinishedStore = SessionFinishedStore()
+    let codexMonitor = CodexCLISessionMonitor()
 
     private(set) var eventProcessor: EventProcessor!
     private(set) var isReady = false
@@ -23,8 +25,8 @@ final class AppStore {
     /// Updated by SettingsView.task and install/uninstall actions.
     var cachedIDEStatuses: [ExtensionInstaller.IDEStatus] = []
 
-    /// Called when a Claude Code event is received — wire to OverlayManager.handleEvent
-    var onEventForOverlay: ((ClaudeEvent) -> Void)?
+    /// Called when an agent event is received — wire to OverlayManager.handleEvent
+    var onEventForOverlay: ((AgentEvent) -> Void)?
     /// Called when a custom input is received via POST /input
     var onInputForOverlay: ((String, ConditionValue) -> Void)?
     /// Called when session phases change outside of events (e.g. interrupt detection via transcript)
@@ -41,6 +43,9 @@ final class AppStore {
     var navigateToMascotId: UUID?
 
     var hasUnreadNotifications: Bool { notificationStore.unreadCount > 0 }
+    var codexSessionCount: Int { sessionStore.codexSessions.count }
+    var codexLastEventAt: Date? { sessionStore.codexSessions.compactMap(\.lastEventAt).max() }
+    var codexSessionsDirectory: URL { sessionStore.codexSessionsDirectory }
 
     var hasCompletedOnboarding: Bool = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
         didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding") }
@@ -53,63 +58,13 @@ final class AppStore {
             notificationStore: notificationStore,
             notificationService: notificationService
         )
+        codexMonitor.delegate = self
 
         // Wire local server → event processor + overlay state machine
         localServer.onEventReceived = { [weak self] event in
             guard let self else { return }
             Task { @MainActor in
-                await self.eventProcessor.process(event)
-
-                // If a subsequent event arrives for a session with pending permissions,
-                // the user may have resolved a permission from the terminal — dismiss it.
-                // For postToolUse/postToolUseFailure: only dismiss the SPECIFIC tool use
-                // that completed (by toolUseId), not all permissions for the agent.
-                // For stop/userPromptSubmit: session is ending, dismiss all for that agent.
-                if let eventType = event.eventType,
-                   let sid = event.sessionId {
-                    // Cache PreToolUse toolUseId — fires immediately before PermissionRequest
-                    // for the same tool call, and carries the tool_use_id that PermissionRequest lacks.
-                    if eventType == .preToolUse,
-                       let toolUseId = event.toolUseId,
-                       let toolName = event.toolName {
-                        self.pendingPermissionStore.cachePreToolUse(
-                            sessionId: sid, agentId: event.agentId,
-                            toolName: toolName, toolUseId: toolUseId
-                        )
-                    }
-
-                    if [.stop, .userPromptSubmit].contains(eventType),
-                       self.pendingPermissionStore.pending.contains(where: {
-                           $0.event.sessionId == sid && $0.event.agentId == event.agentId
-                       }) {
-                        self.pendingPermissionStore.dismissForAgent(sessionId: sid, agentId: event.agentId)
-                    } else if [.postToolUse, .postToolUseFailure].contains(eventType),
-                              let toolUseId = event.toolUseId {
-                        // Only dismiss the specific permission whose tool was just executed
-                        // (i.e. user answered from terminal, not from the overlay).
-                        self.pendingPermissionStore.dismissByToolUseId(sessionId: sid, toolUseId: toolUseId)
-                    }
-                }
-
-                // Show "task completed" toast when Claude finishes (skip interrupts)
-                if event.eventType == .stop,
-                   event.reason != "interrupted",
-                   !self.pendingPermissionStore.pending.contains(where: { $0.event.sessionId == event.sessionId }) {
-                    self.sessionFinishedStore.show(
-                        sessionId: event.sessionId ?? "",
-                        projectName: event.projectName ?? "Project"
-                    )
-                    self.syncActiveCard()
-                    // Trigger overlay panel reposition after SwiftUI renders the toast
-                    self.onToastChanged?()
-                }
-
-                // Dismiss toast when user starts typing (already back in the loop)
-                if event.eventType == .userPromptSubmit {
-                    self.sessionFinishedStore.dismiss()
-                }
-
-                self.onEventForOverlay?(event)
+                await self.handleIncomingEvent(event)
             }
         }
 
@@ -344,6 +299,7 @@ final class AppStore {
         } catch {
             print("[masko-desktop] Failed to start local server: \(error)")
         }
+        codexMonitor.start()
 
         // Reconcile sessions when app comes to foreground (crash recovery).
         // Throttled to at most once per 30 seconds — this notification fires on every
@@ -384,8 +340,73 @@ final class AppStore {
     /// Tear down server and timers to prevent zombie processes
     func stop() {
         localServer.stop()
+        codexMonitor.stop()
         sessionStore.stopTimers()
         pendingPermissionStore.stopTimers()
         hotkeyManager.stop()
+    }
+
+    @MainActor
+    private func handleIncomingEvent(_ event: AgentEvent) async {
+        await eventProcessor.process(event)
+
+        // If a subsequent event arrives for a session with pending permissions,
+        // the user may have resolved a permission from the terminal — dismiss it.
+        // For postToolUse/postToolUseFailure: only dismiss the specific tool use
+        // that completed (by toolUseId), not all permissions for the agent.
+        if let eventType = event.eventType,
+           let sid = event.sessionId {
+            if eventType == .preToolUse,
+               let toolUseId = event.toolUseId,
+               let toolName = event.toolName {
+                pendingPermissionStore.cachePreToolUse(
+                    sessionId: sid, agentId: event.agentId,
+                    toolName: toolName, toolUseId: toolUseId
+                )
+            }
+
+            if [.stop, .userPromptSubmit].contains(eventType),
+               pendingPermissionStore.pending.contains(where: {
+                   $0.event.sessionId == sid && $0.event.agentId == event.agentId
+               }) {
+                pendingPermissionStore.dismissForAgent(sessionId: sid, agentId: event.agentId)
+            } else if [.postToolUse, .postToolUseFailure].contains(eventType),
+                      let toolUseId = event.toolUseId {
+                pendingPermissionStore.dismissByToolUseId(sessionId: sid, toolUseId: toolUseId)
+            }
+        }
+
+        if event.eventType == .stop,
+           event.reason != "interrupted",
+           !pendingPermissionStore.pending.contains(where: { $0.event.sessionId == event.sessionId }) {
+            sessionFinishedStore.show(
+                sessionId: event.sessionId ?? "",
+                projectName: event.projectName ?? "Project"
+            )
+            syncActiveCard()
+            onToastChanged?()
+        }
+
+        if event.eventType == .userPromptSubmit {
+            sessionFinishedStore.dismiss()
+        }
+
+        onEventForOverlay?(event)
+    }
+}
+
+@MainActor
+extension AppStore: CodexCLISessionMonitorDelegate {
+    func codexCLIMonitorDidLoadSnapshot(_ snapshot: CodexSessionSnapshot) {
+        Task { @MainActor in
+            sessionStore.upsertCodexSnapshot(snapshot)
+            onRefreshOverlay?()
+        }
+    }
+
+    func codexCLIMonitorDidEmit(_ event: AgentEvent) {
+        Task { @MainActor in
+            await handleIncomingEvent(event)
+        }
     }
 }

@@ -19,7 +19,7 @@ final class EventProcessor {
         self.notificationService = notificationService
     }
 
-    @MainActor func process(_ event: ClaudeEvent) async {
+    @MainActor func process(_ event: AgentEvent) async {
         eventStore.append(event)
         sessionStore.recordEvent(event)
 
@@ -29,8 +29,10 @@ final class EventProcessor {
         }
     }
 
-    private func createNotification(from event: ClaudeEvent) -> AppNotification? {
+    private func createNotification(from event: AgentEvent) -> AppNotification? {
         guard let eventType = event.eventType else { return nil }
+        let agentName = event.agentDisplayName
+        let agentShortName = event.agentSource == .claude ? "Claude" : "Codex"
 
         switch eventType {
         case .notification:
@@ -38,15 +40,15 @@ final class EventProcessor {
             case "permission_prompt":
                 return AppNotification(
                     title: "Permission Required",
-                    body: event.message ?? "Claude Code needs your approval to proceed",
+                    body: event.message ?? "\(agentName) needs your approval to proceed",
                     category: .permissionRequest,
                     priority: .urgent,
                     sessionId: event.sessionId
                 )
             case "idle_prompt":
                 return AppNotification(
-                    title: "Claude is Waiting",
-                    body: event.message ?? "Claude Code has been idle in \(event.projectName ?? "a project")",
+                    title: "\(agentShortName) is Waiting",
+                    body: event.message ?? "\(agentName) has been idle in \(event.projectName ?? "a project")",
                     category: .idleAlert,
                     priority: .high,
                     sessionId: event.sessionId
@@ -54,7 +56,7 @@ final class EventProcessor {
             case "elicitation_dialog":
                 return AppNotification(
                     title: "Input Needed",
-                    body: event.message ?? "Claude Code needs your input",
+                    body: event.message ?? "\(agentName) needs your input",
                     category: .elicitationDialog,
                     priority: .high,
                     sessionId: event.sessionId
@@ -74,7 +76,7 @@ final class EventProcessor {
                let questionText = qDict["question"] as? String {
                 body = questionText
             } else {
-                body = "Claude wants to use \(event.toolName ?? "a tool") in \(event.projectName ?? "a project")"
+                body = "\(agentShortName) wants to use \(event.toolName ?? "a tool") in \(event.projectName ?? "a project")"
             }
             return AppNotification(
                 title: event.toolName == "AskUserQuestion" ? "Question" : "Permission Requested",
@@ -88,7 +90,7 @@ final class EventProcessor {
             return AppNotification(
                 title: "Task Completed",
                 body: truncate(event.lastAssistantMessage, maxLength: 100)
-                    ?? "Claude Code finished in \(event.projectName ?? "a project")",
+                    ?? "\(agentName) finished in \(event.projectName ?? "a project")",
                 category: .sessionLifecycle,
                 priority: .normal,
                 sessionId: event.sessionId
@@ -133,7 +135,7 @@ final class EventProcessor {
         case .preCompact:
             return AppNotification(
                 title: "Context Compacting",
-                body: "Claude Code is compacting context in \(event.projectName ?? "a project")",
+                body: "\(agentName) is compacting context in \(event.projectName ?? "a project")",
                 category: .sessionLifecycle,
                 priority: .low,
                 sessionId: event.sessionId

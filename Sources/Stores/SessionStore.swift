@@ -1,9 +1,10 @@
 import Foundation
 
-struct ClaudeSession: Identifiable, Codable {
-    let id: String // session_id from Claude Code
-    let projectDir: String?
-    let projectName: String?
+struct AgentSession: Identifiable, Codable {
+    let id: String // session_id from Claude Code or Codex
+    var projectDir: String?
+    var projectName: String?
+    var agentSource: AgentSource
     var status: Status
     var phase: Phase = .idle
     var eventCount: Int
@@ -30,11 +31,82 @@ struct ClaudeSession: Identifiable, Codable {
         case running    // After UserPromptSubmit or tool use — agent is working
         case compacting // After PreCompact — context compaction in progress
     }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case projectDir
+        case projectName
+        case agentSource
+        case status
+        case phase
+        case eventCount
+        case startedAt
+        case lastEventAt
+        case lastToolName
+        case activeSubagentCount
+        case isCompacting
+        case terminalPid
+        case shellPid
+        case transcriptPath
+    }
+
+    init(
+        id: String,
+        projectDir: String?,
+        projectName: String?,
+        agentSource: AgentSource = .claude,
+        status: Status,
+        phase: Phase = .idle,
+        eventCount: Int,
+        startedAt: Date,
+        lastEventAt: Date?,
+        lastToolName: String? = nil,
+        activeSubagentCount: Int = 0,
+        isCompacting: Bool = false,
+        terminalPid: Int? = nil,
+        shellPid: Int? = nil,
+        transcriptPath: String? = nil
+    ) {
+        self.id = id
+        self.projectDir = projectDir
+        self.projectName = projectName
+        self.agentSource = agentSource
+        self.status = status
+        self.phase = phase
+        self.eventCount = eventCount
+        self.startedAt = startedAt
+        self.lastEventAt = lastEventAt
+        self.lastToolName = lastToolName
+        self.activeSubagentCount = activeSubagentCount
+        self.isCompacting = isCompacting
+        self.terminalPid = terminalPid
+        self.shellPid = shellPid
+        self.transcriptPath = transcriptPath
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.projectDir = try container.decodeIfPresent(String.self, forKey: .projectDir)
+        self.projectName = try container.decodeIfPresent(String.self, forKey: .projectName)
+        self.agentSource = try container.decodeIfPresent(AgentSource.self, forKey: .agentSource) ?? .claude
+        self.status = try container.decode(Status.self, forKey: .status)
+        self.phase = try container.decodeIfPresent(Phase.self, forKey: .phase) ?? .idle
+        self.eventCount = try container.decode(Int.self, forKey: .eventCount)
+        self.startedAt = try container.decode(Date.self, forKey: .startedAt)
+        self.lastEventAt = try container.decodeIfPresent(Date.self, forKey: .lastEventAt)
+        self.lastToolName = try container.decodeIfPresent(String.self, forKey: .lastToolName)
+        self.activeSubagentCount = try container.decodeIfPresent(Int.self, forKey: .activeSubagentCount) ?? 0
+        self.isCompacting = try container.decodeIfPresent(Bool.self, forKey: .isCompacting) ?? false
+        self.terminalPid = try container.decodeIfPresent(Int.self, forKey: .terminalPid)
+        self.shellPid = try container.decodeIfPresent(Int.self, forKey: .shellPid)
+        self.transcriptPath = try container.decodeIfPresent(String.self, forKey: .transcriptPath)
+    }
 }
 
 @Observable
 final class SessionStore {
-    private(set) var sessions: [ClaudeSession] = []
+    private(set) var sessions: [AgentSession] = []
     private static let filename = "sessions.json"
     private var reconcileTimer: Timer?
     private var interruptWatcherTimer: Timer?
@@ -44,7 +116,7 @@ final class SessionStore {
     var onPhasesChanged: (() -> Void)?
 
     init() {
-        sessions = LocalStorage.load([ClaudeSession].self, from: Self.filename) ?? []
+        sessions = LocalStorage.load([AgentSession].self, from: Self.filename) ?? []
         reconcileIfNeeded()
         startReconcileTimer()
         startInterruptWatcher()
@@ -76,6 +148,7 @@ final class SessionStore {
         // Collect data needed for background I/O
         let candidates: [(index: Int, id: String, path: String, lastEventAt: Date?)] = sessions.indices.compactMap {
             guard sessions[$0].status == .active,
+                  sessions[$0].agentSource == .claude,
                   sessions[$0].phase == .running,
                   let path = sessions[$0].transcriptPath else { return nil }
             return ($0, sessions[$0].id, path, sessions[$0].lastEventAt)
@@ -191,41 +264,43 @@ final class SessionStore {
         guard !activeSessions.isEmpty else { return }
 
         // Run pgrep on a background thread to avoid blocking the UI
-        checkForClaudeProcesses { [weak self] hasClaudeProcess in
+        checkForAgentProcesses { [weak self] processState in
             DispatchQueue.main.async {
-                self?.applyReconciliation(hasClaudeProcess: hasClaudeProcess)
+                self?.applyReconciliation(processState: processState)
             }
         }
     }
 
-    private func applyReconciliation(hasClaudeProcess: Bool) {
+    private func applyReconciliation(processState: [AgentSource: Bool]) {
         guard !activeSessions.isEmpty else { return }
 
         var changed = false
 
-        // 1. If no Claude process at all, end everything
-        if !hasClaudeProcess {
-            for i in sessions.indices where sessions[i].status == .active {
+        // 1. If the owning agent process is gone, end the corresponding sessions.
+        for i in sessions.indices where sessions[i].status == .active {
+            let hasProcess = processState[sessions[i].agentSource] ?? false
+            if !hasProcess {
                 sessions[i].status = .ended
                 sessions[i].phase = .idle
                 sessions[i].activeSubagentCount = 0
                 sessions[i].isCompacting = false
                 changed = true
             }
-        } else {
-            // 2. End individual sessions that are stale (no events in 10+ minutes).
-            // A claude process exists for a different session — but these old ones are dead.
-            let staleThreshold: TimeInterval = 600 // 10 minutes
-            let now = Date()
-            for i in sessions.indices where sessions[i].status == .active {
-                if let lastEvent = sessions[i].lastEventAt,
-                   now.timeIntervalSince(lastEvent) > staleThreshold {
-                    sessions[i].status = .ended
-                    sessions[i].phase = .idle
-                    sessions[i].activeSubagentCount = 0
-                    sessions[i].isCompacting = false
-                    changed = true
-                }
+        }
+
+        // 2. End stale non-running sessions (no events in 10+ minutes).
+        // Running tasks can legitimately go quiet for a long time, especially for Codex.
+        let staleThreshold: TimeInterval = 600 // 10 minutes
+        let now = Date()
+        for i in sessions.indices where sessions[i].status == .active {
+            guard sessions[i].phase != .running else { continue }
+            if let lastEvent = sessions[i].lastEventAt,
+               now.timeIntervalSince(lastEvent) > staleThreshold {
+                sessions[i].status = .ended
+                sessions[i].phase = .idle
+                sessions[i].activeSubagentCount = 0
+                sessions[i].isCompacting = false
+                changed = true
             }
         }
 
@@ -235,22 +310,27 @@ final class SessionStore {
         }
     }
 
-    /// Check if any `claude` CLI processes are running via pgrep (exact name match).
+    /// Check if any monitored agent CLI processes are running via pgrep.
     /// Runs on a background thread to avoid blocking the main/UI thread.
-    private func checkForClaudeProcesses(completion: @escaping (Bool) -> Void) {
+    private func checkForAgentProcesses(completion: @escaping ([AgentSource: Bool]) -> Void) {
         DispatchQueue.global(qos: .utility).async {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-            process.arguments = ["-x", "claude"] // exact match — won't match masko-desktop
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            do {
-                try process.run()
-                process.waitUntilExit()
-                completion(process.terminationStatus == 0) // 0 = found matches
-            } catch {
-                completion(false)
+            var results: [AgentSource: Bool] = [:]
+            for source in AgentSource.allCases {
+                if results[source] != nil { continue }
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+                process.arguments = source.processCheckArguments
+                process.standardOutput = FileHandle.nullDevice
+                process.standardError = FileHandle.nullDevice
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    results[source] = process.terminationStatus == 0
+                } catch {
+                    results[source] = false
+                }
             }
+            completion(results)
         }
     }
 
@@ -262,16 +342,32 @@ final class SessionStore {
 
     // MARK: - Computed Properties
 
-    var activeSessions: [ClaudeSession] {
+    var activeSessions: [AgentSession] {
         sessions.filter { $0.status == .active }
     }
 
-    var runningSessions: [ClaudeSession] {
+    var runningSessions: [AgentSession] {
         activeSessions.filter { $0.phase == .running }
     }
 
-    var idleSessions: [ClaudeSession] {
+    var idleSessions: [AgentSession] {
         activeSessions.filter { $0.phase == .idle }
+    }
+
+    var activeClaudeSessionCount: Int {
+        activeSessions.filter { $0.agentSource == .claude }.count
+    }
+
+    var activeCodexSessionCount: Int {
+        activeSessions.filter { $0.agentSource != .claude }.count
+    }
+
+    var runningClaudeSessionCount: Int {
+        runningSessions.filter { $0.agentSource == .claude }.count
+    }
+
+    var runningCodexSessionCount: Int {
+        runningSessions.filter { $0.agentSource != .claude }.count
     }
 
     var totalActiveSubagents: Int {
@@ -284,10 +380,11 @@ final class SessionStore {
 
     // MARK: - Event Recording
 
-    func recordEvent(_ event: ClaudeEvent) {
+    func recordEvent(_ event: AgentEvent) {
         guard let sessionId = event.sessionId, !sessionId.isEmpty else { return }
 
         if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
+            sessions[index].agentSource = event.agentSource
             sessions[index].eventCount += 1
             sessions[index].lastEventAt = Date()
             if let toolName = event.toolName {
@@ -365,11 +462,12 @@ final class SessionStore {
             }
         } else {
             // New session
-            let phase: ClaudeSession.Phase = event.eventType == .userPromptSubmit ? .running : .idle
-            var session = ClaudeSession(
+            let phase: AgentSession.Phase = event.eventType == .userPromptSubmit ? .running : .idle
+            var session = AgentSession(
                 id: sessionId,
                 projectDir: event.cwd,
                 projectName: event.projectName,
+                agentSource: event.agentSource,
                 status: .active,
                 phase: phase,
                 eventCount: 1,
@@ -382,5 +480,49 @@ final class SessionStore {
             sessions.insert(session, at: 0)
         }
         persist()
+    }
+
+    func upsertCodexSnapshot(_ snapshot: CodexSessionSnapshot) {
+        let phase: AgentSession.Phase = snapshot.isTaskActive ? .running : .idle
+
+        if let index = sessions.firstIndex(where: { $0.id == snapshot.sessionID }) {
+            sessions[index].agentSource = snapshot.source
+            sessions[index].status = .active
+            sessions[index].phase = phase
+            sessions[index].projectDir = snapshot.cwd
+            if let cwd = snapshot.cwd {
+                sessions[index].projectName = URL(fileURLWithPath: cwd).lastPathComponent
+            }
+            sessions[index].lastEventAt = snapshot.lastEventAt ?? sessions[index].lastEventAt
+        } else {
+            let projectName = snapshot.cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
+            let session = AgentSession(
+                id: snapshot.sessionID,
+                projectDir: snapshot.cwd,
+                projectName: projectName,
+                agentSource: snapshot.source,
+                status: .active,
+                phase: phase,
+                eventCount: 0,
+                startedAt: snapshot.lastEventAt ?? Date(),
+                lastEventAt: snapshot.lastEventAt
+            )
+            sessions.insert(session, at: 0)
+        }
+
+        persist()
+        onPhasesChanged?()
+    }
+}
+
+extension SessionStore {
+    var codexSessions: [AgentSession] {
+        sessions.filter { $0.agentSource != .claude }
+    }
+
+    var codexSessionsDirectory: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex")
+            .appendingPathComponent("sessions")
     }
 }
