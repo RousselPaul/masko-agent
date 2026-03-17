@@ -32,7 +32,7 @@ Split architecture: **C overlay renderer** + **Python backend** + **web dashboar
 
 **IPC:** Unix domain socket at `/tmp/masko-overlay.sock`. Line-delimited JSON in both directions. Backend→overlay: display commands. Overlay→backend: user interactions.
 
-**Overlay lifecycle:** Backend spawns the overlay as a child process. Backend waits for `{"event": "ready"}` on the Unix socket before sending commands. If the overlay dies (detected via SIGCHLD + socket EOF), backend respawns it after a 1-second delay, up to 5 retries. If a permission prompt was active, backend auto-denies it on overlay death to unblock Claude Code.
+**Overlay lifecycle:** Backend spawns the overlay as a child process. Backend waits for `{"event": "ready"}` on the Unix socket before sending commands. If the overlay dies (detected via SIGCHLD + socket EOF), backend respawns it after a 1-second delay, up to 5 retries. If a permission prompt was active, backend auto-denies it on overlay death to unblock Claude Code. Any active session switcher is silently discarded.
 
 ## Component 1: C Overlay Renderer (`masko-overlay`)
 
@@ -66,17 +66,37 @@ Split architecture: **C overlay renderer** + **Python backend** + **web dashboar
 - Buttons: Approve (green), Deny (red), Collapse/Defer
 - Visual feedback on hover (PointerMotion) and press
 
+### Session Switcher UI
+
+- Rendered on the overlay surface (same Cairo + Pango approach as permission UI)
+- Vertical list of active sessions: session name/cwd, model, status indicator
+- Highlighted selection row, navigable via arrow keys or mouse
+- Triggered by double-tap Super; dismissed by Escape or clicking outside
+- On confirm: backend focuses the selected session's terminal via terminal_focus module
+
+### Active Card Priority
+
+The overlay can show multiple UI elements. Priority determines which "card" owns keyboard input (highest wins):
+1. Session switcher (highest)
+2. Permission prompt
+3. Toast notification
+4. None (mascot only)
+
+Escape always dismisses the topmost card (no modifier required). When a card is dismissed, input falls through to the next card or to the mascot.
+
 ### Global Hotkeys
 
 - `XGrabKey` for system-wide keyboard shortcuts
 - Default modifier: Super (configurable in settings)
 - Bindings:
   - Super+M: toggle overlay visibility
-  - Super+Enter: approve permission
-  - Super+Escape: deny permission
+  - Super+Enter: approve permission / confirm session switcher selection
+  - Super+Escape: deny permission (Escape alone also dismisses topmost card)
   - Super+L: collapse permission prompt
   - Super+1-9: select session
   - Double-tap Super: session switcher
+  - Arrow Up/Down: navigate session switcher list
+  - Tab/Shift+Tab: navigate session switcher list (alternative)
 
 ### IPC Protocol (overlay side)
 
@@ -88,6 +108,8 @@ Receives from backend (JSON per line):
 - `{"cmd": "move", "x": 100, "y": 100}`
 - `{"cmd": "resize", "w": 200, "h": 200}`
 - `{"cmd": "toast", "text": "Session finished", "duration": 3000}`
+- `{"cmd": "session_switcher", "sessions": [{"id": "abc", "cwd": "/project", "model": "opus", "phase": "working"}], "selected": 0}`
+- `{"cmd": "session_switcher_nav", "direction": "next"}` / `"prev"` / `"confirm"` / `"dismiss"`
 
 Sends to backend (JSON per line):
 - `{"event": "ready"}` — overlay is initialized and accepting commands
@@ -158,6 +180,10 @@ On input change: evaluates all outgoing edges from current node, fires first mat
 
 **MascotStore**: loads bundled mascot configs from `resources/mascots/*.json`, supports fetching remote configs from masko.ai API. Persists user's selected mascot and saved collection.
 
+**SessionSwitcherStore**: tracks the session switcher UI state — whether it's open, which session is selected, the session list snapshot. Populated by SessionStore data when the switcher is opened.
+
+**SessionFinishedStore**: detects session completion events and triggers toast notifications via the overlay. Auto-dismiss after configurable duration (default 5 seconds).
+
 ### Video Cache
 
 Downloads remote mascot videos to `~/.cache/masko-desktop/videos/`. Resolves video URLs: if cached locally, returns local path; otherwise fetches. Evicts files older than 30 days.
@@ -197,7 +223,7 @@ WebSocket connection to backend pushes:
 ## Component 4: Terminal Focus
 
 - Primary: `xdotool windowactivate --sync <window_id>` using terminal PID → window ID mapping via `xdotool search --pid <pid>`
-- VS Code/Cursor: bundle and auto-install the `masko-terminal-focus.vsix` extension (already cross-platform)
+- VS Code, Cursor, VS Code Insiders, Windsurf, Antigravity: bundle and auto-install the `masko-terminal-focus.vsix` extension (already cross-platform). Backend checks installed extension version on startup and upgrades if bundled version is newer.
 - Fallback: `wmctrl -ia <window_id>`
 
 ## Component 5: System Notifications
@@ -241,6 +267,8 @@ masko-linux/
 │   ├── render.c/h        # Cairo drawing, double buffering
 │   ├── video.c/h         # FFmpeg decode, frame extraction
 │   ├── permission_ui.c/h # Permission prompt rendering, hit-testing
+│   ├── session_switcher.c/h # Session switcher rendering, navigation
+│   ├── card_stack.c/h    # Active card priority management
 │   ├── hotkeys.c/h       # XGrabKey management
 │   ├── ipc.c/h           # Unix socket client, JSON parse (cJSON)
 │   ├── toast.c/h         # Toast notification rendering
@@ -272,6 +300,10 @@ masko-linux/
 ├── masko.service         # systemd user service
 └── masko-desktop.desktop # autostart entry
 ```
+
+## Deliberate Simplifications
+
+- **No onboarding wizard.** The install script handles hook installation, dependency checks, and initial config. First-run mascot selection happens via the web dashboard settings page.
 
 ## Non-Goals
 
