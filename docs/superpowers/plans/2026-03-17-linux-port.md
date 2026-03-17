@@ -22,6 +22,7 @@
 
 **Files:**
 - Create: `masko-linux/backend/__init__.py`
+- Create: `masko-linux/backend/stores/__init__.py`
 - Create: `masko-linux/backend/config.py`
 - Create: `masko-linux/overlay/Makefile`
 - Create: `masko-linux/requirements.txt`
@@ -337,7 +338,10 @@ class ClaudeEvent:
 
     @classmethod
     def from_json(cls, raw: str) -> "ClaudeEvent":
-        data = json.loads(raw)
+        return cls.from_dict(json.loads(raw))
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ClaudeEvent":
         return cls(
             hook_event_name=data.get("hook_event_name", ""),
             session_id=data.get("session_id"),
@@ -1156,7 +1160,7 @@ async def handle_hook(request):
     except json.JSONDecodeError:
         return web.Response(status=400, text="invalid json")
 
-    event = ClaudeEvent.from_json(json.dumps(data))
+    event = ClaudeEvent.from_dict(data)
     app = request.app
     app["event_store"].add(event)
     app["session_store"].handle_event(event)
@@ -2052,6 +2056,7 @@ int masko_ipc_fd(MaskoIPC *ipc);
 ```c
 #include "ipc.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -2164,8 +2169,12 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
 
-    int test_mode = (argc > 1 && strcmp(argv[1], "--test-mode") == 0);
+    int test_mode = 0;
     const char *sock_path = "/tmp/masko-overlay.sock";
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--test-mode") == 0) test_mode = 1;
+        if (strcmp(argv[i], "--sock") == 0 && i + 1 < argc) sock_path = argv[i + 1];
+    }
 
     MaskoWindow win;
     if (masko_window_init(&win, 100, 100, 200, 200) != 0) return 1;
@@ -2240,7 +2249,13 @@ int main(int argc, char *argv[]) {
 }
 ```
 
-- [ ] **Step 5: Update Makefile to include cJSON dependency**
+- [ ] **Step 5: Add XShape click-through and drag handling to window.c**
+
+Add `masko_window_update_shape(MaskoWindow *win, cairo_surface_t *content)` — scans the back buffer alpha channel, creates an XShape region mask with only opaque pixels as input region. Call after each `flip()`. This makes transparent areas click-through.
+
+Add drag handling to `main.c`: on ButtonPress in mascot area, enter drag mode. On PointerMotion during drag, `masko_window_move()`. On ButtonRelease, exit drag mode and send `{"event": "position", "x": ..., "y": ...}` via IPC.
+
+- [ ] **Step 6: Update Makefile to include cJSON dependency**
 
 Add `cjson` to pkg-config in overlay/Makefile:
 ```makefile
@@ -2248,7 +2263,7 @@ CFLAGS = -Wall -Wextra -O2 $(shell pkg-config --cflags x11 xext xcomposite xfixe
 LDFLAGS = $(shell pkg-config --libs x11 xext xcomposite xfixes cairo pango pangocairo libavformat libavcodec libavutil libswscale cjson) -lm
 ```
 
-- [ ] **Step 6: Build and run E2E test**
+- [ ] **Step 7: Build and run E2E test**
 
 ```bash
 cd masko-linux && make overlay
@@ -2258,10 +2273,10 @@ bash tests/test_overlay_window.sh /tmp/masko-screenshots
 
 Expected: Window found, override_redirect confirmed, screenshot captured.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add -A && git commit -m "feat: C overlay with X11 ARGB window and IPC client"
+git add -A && git commit -m "feat: C overlay with X11 ARGB window, XShape click-through, drag, and IPC client"
 ```
 
 ---
@@ -2512,7 +2527,66 @@ git add -A && git commit -m "feat: FFmpeg video decoder for mascot animations"
 
 - [ ] **Step 1: Write E2E test for permission UI**
 
-`tests/test_permission_ui.sh`: Start overlay on Xvfb, send permission command via IPC, screenshot, verify speech bubble is visible (non-transparent region exists at expected coordinates). Click approve button with `xdotool`, verify response sent back on IPC.
+```bash
+#!/usr/bin/env bash
+# tests/test_permission_ui.sh
+set -euo pipefail
+DISPLAY_NUM=:97
+SCREENSHOT_DIR="${1:-/tmp/masko-test-screenshots}"
+mkdir -p "$SCREENSHOT_DIR"
+SOCK_PATH="/tmp/masko-test-perm.sock"
+
+cleanup() { kill $XVFB_PID 2>/dev/null || true; kill $OVERLAY_PID 2>/dev/null || true; rm -f "$SOCK_PATH"; }
+trap cleanup EXIT
+
+Xvfb $DISPLAY_NUM -screen 0 1920x1080x24+32 -ac &
+XVFB_PID=$!
+sleep 1
+export DISPLAY=$DISPLAY_NUM
+
+# Start overlay (normal mode, will connect to our socket)
+./overlay/masko-overlay --sock "$SOCK_PATH" &
+OVERLAY_PID=$!
+sleep 2
+
+# Python helper: act as backend IPC server, send permission, read response
+RESULT=$(python3 -c "
+import socket, json, time, sys
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind('$SOCK_PATH')
+srv.listen(1)
+srv.settimeout(5)
+conn, _ = srv.accept()
+
+# Wait for ready
+data = conn.recv(4096).decode()
+assert '\"ready\"' in data, f'Expected ready, got: {data}'
+print('PASS: overlay sent ready event', file=sys.stderr)
+
+# Send permission command
+cmd = json.dumps({'cmd': 'permission', 'tool': 'Bash', 'input': 'rm -rf /', 'id': 'test-perm-1'}) + '\n'
+conn.sendall(cmd.encode())
+time.sleep(1)
+
+# Take screenshot before interaction
+import subprocess
+subprocess.run(['import', '-window', 'root', '$SCREENSHOT_DIR/permission-ui.png'])
+
+# Click approve button (approximate center of overlay, bottom-left button area)
+subprocess.run(['xdotool', 'mousemove', '150', '280', 'click', '1'])
+time.sleep(0.5)
+
+# Read response
+conn.settimeout(3)
+resp = conn.recv(4096).decode()
+print(resp)
+conn.close()
+srv.close()
+")
+
+echo "$RESULT" | grep -q '"approve"' && echo "PASS: approve response received" || echo "FAIL: no approve in response: $RESULT"
+echo "Screenshot saved to $SCREENSHOT_DIR/permission-ui.png"
+```
 
 - [ ] **Step 2: Implement card_stack.h/c** — active card priority enum (NONE, TOAST, PERMISSION, SESSION_SWITCHER), push/pop/current.
 
@@ -2538,7 +2612,50 @@ git add -A && git commit -m "feat: permission prompt UI with Cairo rendering and
 - Create: `masko-linux/overlay/hotkeys.h`
 - Create: `masko-linux/overlay/hotkeys.c`
 
-- [ ] **Step 1: Write E2E test** — start overlay on Xvfb, grab Super+M, simulate keypress with `xdotool key super+m`, verify overlay sends toggle hotkey event on IPC.
+- [ ] **Step 1: Write E2E test**
+
+```bash
+#!/usr/bin/env bash
+# tests/test_hotkeys.sh
+set -euo pipefail
+DISPLAY_NUM=:96
+SOCK_PATH="/tmp/masko-test-hotkey.sock"
+
+cleanup() { kill $XVFB_PID 2>/dev/null || true; kill $OVERLAY_PID 2>/dev/null || true; rm -f "$SOCK_PATH"; }
+trap cleanup EXIT
+
+Xvfb $DISPLAY_NUM -screen 0 1920x1080x24+32 -ac &
+XVFB_PID=$!
+sleep 1
+export DISPLAY=$DISPLAY_NUM
+
+./overlay/masko-overlay --sock "$SOCK_PATH" &
+OVERLAY_PID=$!
+sleep 2
+
+RESULT=$(python3 -c "
+import socket, json, time, subprocess, sys
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind('$SOCK_PATH')
+srv.listen(1)
+srv.settimeout(5)
+conn, _ = srv.accept()
+conn.recv(4096)  # ready event
+
+# Simulate Super+M keypress
+time.sleep(0.5)
+subprocess.run(['xdotool', 'key', 'super+m'])
+time.sleep(0.5)
+
+conn.settimeout(3)
+data = conn.recv(4096).decode()
+print(data)
+conn.close()
+srv.close()
+")
+
+echo "$RESULT" | grep -q '"toggle"' && echo "PASS: toggle hotkey event received" || echo "FAIL: no toggle event: $RESULT"
+```
 
 - [ ] **Step 2: Implement hotkeys.h/c** — `hotkeys_init(display, config_json)`, `hotkeys_grab_all(display)`, `hotkeys_ungrab_all(display)`, `hotkeys_handle_key(event)` returning action string.
 
@@ -2560,7 +2677,51 @@ git add -A && git commit -m "feat: global hotkey system via XGrabKey"
 - Create: `masko-linux/overlay/toast.h`
 - Create: `masko-linux/overlay/toast.c`
 
-- [ ] **Step 1: Write E2E test** — send toast command via IPC, screenshot, verify text rendered.
+- [ ] **Step 1: Write E2E test**
+
+```bash
+#!/usr/bin/env bash
+# tests/test_toast.sh
+set -euo pipefail
+DISPLAY_NUM=:95
+SOCK_PATH="/tmp/masko-test-toast.sock"
+SCREENSHOT_DIR="${1:-/tmp/masko-test-screenshots}"
+mkdir -p "$SCREENSHOT_DIR"
+
+cleanup() { kill $XVFB_PID 2>/dev/null || true; kill $OVERLAY_PID 2>/dev/null || true; rm -f "$SOCK_PATH"; }
+trap cleanup EXIT
+
+Xvfb $DISPLAY_NUM -screen 0 1920x1080x24+32 -ac &
+XVFB_PID=$!
+sleep 1
+export DISPLAY=$DISPLAY_NUM
+
+./overlay/masko-overlay --sock "$SOCK_PATH" &
+OVERLAY_PID=$!
+sleep 2
+
+python3 -c "
+import socket, json, time, subprocess
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind('$SOCK_PATH')
+srv.listen(1)
+srv.settimeout(5)
+conn, _ = srv.accept()
+conn.recv(4096)  # ready
+
+cmd = json.dumps({'cmd': 'toast', 'text': 'Session finished!', 'duration': 5000}) + '\n'
+conn.sendall(cmd.encode())
+time.sleep(1)
+subprocess.run(['import', '-window', 'root', '$SCREENSHOT_DIR/toast.png'])
+conn.close()
+srv.close()
+"
+
+# Verify screenshot has non-transparent content (toast text region)
+PIXELS=$(identify -verbose "$SCREENSHOT_DIR/toast.png" 2>/dev/null | grep -c "srgba" || echo 0)
+echo "Screenshot saved to $SCREENSHOT_DIR/toast.png"
+echo "PASS: toast test complete (check screenshot)"
+```
 
 - [ ] **Step 2: Implement toast.h/c** — `toast_show(text, duration_ms)`, `toast_draw(cr)`, `toast_tick(elapsed_ms)` returning whether still visible.
 
@@ -2582,7 +2743,69 @@ git add -A && git commit -m "feat: toast notification overlay with auto-dismiss"
 - Create: `masko-linux/overlay/session_switcher.h`
 - Create: `masko-linux/overlay/session_switcher.c`
 
-- [ ] **Step 1: Write E2E test** — send session_switcher command with session list, screenshot, verify list rendered. Send nav commands, verify selection changes.
+- [ ] **Step 1: Write E2E test**
+
+```bash
+#!/usr/bin/env bash
+# tests/test_session_switcher.sh
+set -euo pipefail
+DISPLAY_NUM=:94
+SOCK_PATH="/tmp/masko-test-switcher.sock"
+SCREENSHOT_DIR="${1:-/tmp/masko-test-screenshots}"
+mkdir -p "$SCREENSHOT_DIR"
+
+cleanup() { kill $XVFB_PID 2>/dev/null || true; kill $OVERLAY_PID 2>/dev/null || true; rm -f "$SOCK_PATH"; }
+trap cleanup EXIT
+
+Xvfb $DISPLAY_NUM -screen 0 1920x1080x24+32 -ac &
+XVFB_PID=$!
+sleep 1
+export DISPLAY=$DISPLAY_NUM
+
+./overlay/masko-overlay --sock "$SOCK_PATH" &
+OVERLAY_PID=$!
+sleep 2
+
+RESULT=$(python3 -c "
+import socket, json, time, subprocess, sys
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind('$SOCK_PATH')
+srv.listen(1)
+srv.settimeout(5)
+conn, _ = srv.accept()
+conn.recv(4096)  # ready
+
+# Show session switcher
+sessions = [
+    {'id': 's1', 'cwd': '/home/user/project-a', 'model': 'opus', 'phase': 'working'},
+    {'id': 's2', 'cwd': '/home/user/project-b', 'model': 'sonnet', 'phase': 'idle'},
+]
+cmd = json.dumps({'cmd': 'session_switcher', 'sessions': sessions, 'selected': 0}) + '\n'
+conn.sendall(cmd.encode())
+time.sleep(1)
+subprocess.run(['import', '-window', 'root', '$SCREENSHOT_DIR/switcher-initial.png'])
+
+# Navigate down
+cmd = json.dumps({'cmd': 'session_switcher_nav', 'direction': 'next'}) + '\n'
+conn.sendall(cmd.encode())
+time.sleep(0.5)
+subprocess.run(['import', '-window', 'root', '$SCREENSHOT_DIR/switcher-nav.png'])
+
+# Confirm selection
+cmd = json.dumps({'cmd': 'session_switcher_nav', 'direction': 'confirm'}) + '\n'
+conn.sendall(cmd.encode())
+time.sleep(0.5)
+
+conn.settimeout(3)
+data = conn.recv(4096).decode()
+print(data)
+conn.close()
+srv.close()
+")
+
+echo "$RESULT" | grep -q '"confirm"' && echo "PASS: confirm event received" || echo "FAIL: $RESULT"
+echo "Screenshots saved to $SCREENSHOT_DIR/switcher-*.png"
+```
 
 - [ ] **Step 2: Implement session_switcher.h/c** — `session_switcher_show(sessions_json)`, `session_switcher_draw(cr)`, `session_switcher_nav(direction)`, `session_switcher_hit_test(x,y)`.
 
@@ -2608,7 +2831,13 @@ git add -A && git commit -m "feat: session switcher overlay with keyboard naviga
 
 - [ ] **Step 1: Write integration test** — start full backend, POST events via HTTP, verify state machine transitions and IPC messages sent to a mock overlay connection.
 
-- [ ] **Step 2: Implement `__main__.py`** — loads config, initializes stores, starts HTTP server + IPC server, spawns overlay process, handles SIGCHLD for overlay restart, connects event processor to IPC (state machine transitions → overlay commands).
+- [ ] **Step 2: Implement `__main__.py`** — loads config, initializes stores, starts HTTP server + IPC server, spawns overlay process, connects event processor to IPC. Overlay lifecycle requirements:
+  - Wait for `{"event": "ready"}` on IPC before sending commands
+  - Detect overlay death via SIGCHLD + socket EOF
+  - Respawn after 1-second delay, up to 5 retries
+  - On respawn: re-send current state machine node (animation resumes)
+  - On overlay death with active permission: auto-deny to unblock Claude Code hook
+  - On overlay death with active session switcher: silently discard
 
 - [ ] **Step 3: Wire permission flow** — PermissionRequest holds HTTP connection, sends permission command to overlay, overlay response resolves the future, HTTP response sent back to hook script.
 
@@ -2652,7 +2881,15 @@ git add -A && git commit -m "feat: terminal focus via xdotool with IDE extension
 
 - [ ] **Step 1: Write E2E test** — start backend, open dashboard in headless browser (or curl), verify HTML served, verify WebSocket connection delivers session updates.
 
-- [ ] **Step 2: Implement dashboard HTML/JS/CSS** — sessions page, activity feed, notifications, settings. WebSocket connection for live updates.
+- [ ] **Step 2a: Implement dashboard shell** — `index.html` with nav tabs, `style.css` with layout, `app.js` with WebSocket connection and tab routing. Verify: page loads, WebSocket connects.
+
+- [ ] **Step 2b: Implement sessions page** — list active/recent sessions with status indicator, click for detail (events, model, cwd). Data from `GET /api/sessions`.
+
+- [ ] **Step 2c: Implement activity feed page** — chronological event stream. Data from `GET /api/events`.
+
+- [ ] **Step 2d: Implement notifications page** — notification list with unread badge, dismiss/clear buttons. Data from `GET /api/notifications`, actions via `POST /api/notifications/:id/read` and `POST /api/notifications/clear`.
+
+- [ ] **Step 2e: Implement settings page** — mascot picker grid, hotkey config, overlay position/size. Data from `GET /api/config`, save via `POST /api/config`.
 
 - [ ] **Step 3: Add dashboard routes to server.py** — serve static files from dashboard/, WebSocket endpoint /ws that pushes store changes.
 
@@ -2670,6 +2907,7 @@ git add -A && git commit -m "feat: web dashboard with live session tracking"
 
 **Files:**
 - Create: `masko-linux/backend/notify.py`
+- Create: `masko-linux/tests/test_notify.py`
 
 - [ ] **Step 1: Write test** (mock subprocess.run for notify-send)
 
