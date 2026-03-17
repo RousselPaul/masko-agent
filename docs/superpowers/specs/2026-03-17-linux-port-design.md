@@ -32,7 +32,11 @@ Split architecture: **C overlay renderer** + **Python backend** + **web dashboar
 
 **IPC:** Unix domain socket at `/tmp/masko-overlay.sock`. Line-delimited JSON in both directions. Backend→overlay: display commands. Overlay→backend: user interactions.
 
-**Overlay lifecycle:** Backend spawns the overlay as a child process. Backend waits for `{"event": "ready"}` on the Unix socket before sending commands. If the overlay dies (detected via SIGCHLD + socket EOF), backend respawns it after a 1-second delay, up to 5 retries. If a permission prompt was active, backend auto-denies it on overlay death to unblock Claude Code. Any active session switcher is silently discarded.
+**Overlay lifecycle:** Backend spawns the overlay as a child process. Backend waits for `{"event": "ready"}` on the Unix socket before sending commands. If the overlay dies (detected via SIGCHLD + socket EOF), backend respawns it after a 1-second delay, up to 5 retries. On respawn, backend re-sends the current state machine node (so the mascot resumes its current animation). If a permission prompt was active, backend auto-denies it on overlay death to unblock Claude Code. Any active session switcher is silently discarded.
+
+**Session switcher keyboard flow:** Arrow keys/Tab are captured by the overlay via XGrabKey. The overlay sends `{"event": "hotkey", "key": "session_nav_next"}` (or `prev`/`confirm`/`dismiss`) to the backend. The backend updates SessionSwitcherStore and sends back `session_switcher_nav` commands with updated selection index. This round-trip keeps session state authoritative in the backend.
+
+**Port conflicts:** If the configured port is in use, the backend exits with a clear error message. No auto-retry — the user should change the port in config or stop the conflicting process.
 
 ## Component 1: C Overlay Renderer (`masko-overlay`)
 
@@ -94,7 +98,7 @@ Escape always dismisses the topmost card (no modifier required). When a card is 
   - Super+Escape: deny permission (Escape alone also dismisses topmost card)
   - Super+L: collapse permission prompt
   - Super+1-9: select session
-  - Double-tap Super: session switcher
+  - Double-tap Super: session switcher (300ms window between taps)
   - Arrow Up/Down: navigate session switcher list
   - Tab/Shift+Tab: navigate session switcher list (alternative)
 
@@ -282,7 +286,9 @@ masko-linux/
 │   │   ├── permission.py
 │   │   ├── notification.py
 │   │   ├── event.py
-│   │   └── mascot.py
+│   │   ├── mascot.py
+│   │   ├── session_switcher.py
+│   │   └── session_finished.py
 │   ├── hook_installer.py
 │   ├── video_cache.py
 │   ├── config.py
