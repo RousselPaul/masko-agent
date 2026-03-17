@@ -32,10 +32,13 @@ Split architecture: **C overlay renderer** + **Python backend** + **web dashboar
 
 **IPC:** Unix domain socket at `/tmp/masko-overlay.sock`. Line-delimited JSON in both directions. Backend→overlay: display commands. Overlay→backend: user interactions.
 
+**Overlay lifecycle:** Backend spawns the overlay as a child process. Backend waits for `{"event": "ready"}` on the Unix socket before sending commands. If the overlay dies (detected via SIGCHLD + socket EOF), backend respawns it after a 1-second delay, up to 5 retries. If a permission prompt was active, backend auto-denies it on overlay death to unblock Claude Code.
+
 ## Component 1: C Overlay Renderer (`masko-overlay`)
 
 ### X11 Window
 
+- On startup: check for Composite extension via `XCompositeQueryExtension`. If absent, print a clear error ("Masko overlay requires X11 Composite extension") and exit 1.
 - `XCreateWindow` with 32-bit ARGB visual (Composite extension required)
 - `override_redirect = True` — bypasses window manager, no decorations, no taskbar entry
 - `_NET_WM_WINDOW_TYPE_DOCK` + `_NET_WM_STATE_ABOVE` for always-on-top stacking
@@ -87,27 +90,29 @@ Receives from backend (JSON per line):
 - `{"cmd": "toast", "text": "Session finished", "duration": 3000}`
 
 Sends to backend (JSON per line):
+- `{"event": "ready"}` — overlay is initialized and accepting commands
 - `{"event": "permission_response", "id": "abc123", "action": "approve"}`
 - `{"event": "hotkey", "key": "toggle"}`
 - `{"event": "hotkey", "key": "session_switcher"}`
 - `{"event": "position", "x": 150, "y": 200}` — after drag
+- `{"event": "error", "msg": "video decode failed: corrupted.webm"}`
 
 ### Dependencies
 
-libX11, libXext (XShape), libXcomposite, libXfixes, libcairo, libpango, libavformat, libavcodec, libavutil, libswscale
+libX11, libXext (XShape), libXcomposite, libXfixes, libcairo, libpango, libavformat, libavcodec, libavutil, libswscale (FFmpeg >= 5.0, targeting the `avcodec_send_packet`/`avcodec_receive_frame` API)
 
 ## Component 2: Python Backend (`masko-backend`)
 
 ### Hook Integration
 
 Ported from `HookInstaller.swift`. Installs:
-- Bash hook script at `~/.masko-desktop/hooks/hook-sender.sh`
+- Bash hook script at `~/.masko-desktop/hooks/hook-sender.sh` (reads port from `~/.config/masko-desktop/config.json` at invocation time, so port changes take effect on next hook fire)
 - Registers in `~/.claude/settings.json` for 17 event types: PreToolUse, PostToolUse, PostToolUseFailure, Stop, Notification, SessionStart, SessionEnd, TaskCompleted, PermissionRequest, UserPromptSubmit, SubagentStart, SubagentStop, PreCompact, ConfigChange, TeammateIdle, WorktreeCreate, WorktreeRemove
 
 The hook script:
 - Checks server health via `curl GET /health`
 - Sends event via `curl POST /hook` with JSON body
-- For PermissionRequest: blocks on curl (backend holds TCP connection until user responds)
+- For PermissionRequest: blocks on curl with `--max-time 120` (2 minute timeout). On timeout, sends deny response back to Claude Code. Backend holds the TCP connection until the user responds via overlay or timeout fires.
 
 ### HTTP Server (aiohttp)
 
@@ -139,7 +144,7 @@ Bridges events to state machine inputs:
 Ported from `OverlayStateMachine.swift`. Loads mascot JSON configs defining:
 - **Nodes**: named animation states (e.g., "Idle", "Working", "Alert")
 - **Edges**: transitions between nodes with condition expressions and video URLs
-- **Conditions**: boolean/numeric expressions over named inputs (e.g., `claudeCode::isWorking == true`)
+- **Conditions**: identical semantics to the original `OverlayStateMachine.swift`. Expression language supports: `==`, `!=`, `>`, `<`, `>=`, `<=` operators over boolean and numeric inputs. Logical combinators: `and`, `or`, `not`. Inputs are namespaced strings (e.g., `claudeCode::isWorking`).
 
 On input change: evaluates all outgoing edges from current node, fires first matching transition, tells overlay to play the transition video, then sets new current node.
 
@@ -165,7 +170,7 @@ JSON config at `~/.config/masko-desktop/config.json`:
   "selected_mascot": "masko",
   "overlay": {"x": 100, "y": 100, "width": 150, "height": 150},
   "hotkeys": {"modifier": "Super", "toggle": "m", "approve": "Return", "deny": "Escape"},
-  "server": {"hook_port": 49152, "dashboard_port": 49153},
+  "server": {"hook_port": 49152, "dashboard_port": 49153, "permission_timeout": 120},
   "notifications": {"system_notify": true}
 }
 ```
@@ -185,7 +190,7 @@ Single-page app served by the Python backend. Vanilla JS + CSS, no framework.
 
 WebSocket connection to backend pushes:
 - New session events
-- Permission requests (mirrored from overlay for awareness)
+- Permission requests (read-only mirror — permissions can only be responded to via the overlay or hotkeys, not the dashboard, to avoid race conditions)
 - Notification updates
 - Session state changes
 
