@@ -1,11 +1,13 @@
 #include "window.h"
 #include "ipc.h"
+#include "video.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
+#include <sys/time.h>
 #include <sys/select.h>
 #include <X11/Xlib.h>
 #include <cairo/cairo.h>
@@ -17,6 +19,26 @@ static void on_signal(int sig)
 {
     (void)sig;
     running = 0;
+}
+
+typedef struct {
+    int active;
+    int start_mouse_x, start_mouse_y;
+    int start_win_x, start_win_y;
+} DragState;
+
+typedef struct {
+    MaskoVideo video;
+    int is_playing;
+    int is_looping;
+    double fps;
+    struct timeval last_frame_time;
+} PlaybackState;
+
+static double elapsed_ms(struct timeval *from, struct timeval *to)
+{
+    return (to->tv_sec - from->tv_sec) * 1000.0
+         + (to->tv_usec - from->tv_usec) / 1000.0;
 }
 
 static void draw_placeholder(MaskoWindow *w)
@@ -39,7 +61,48 @@ static void draw_placeholder(MaskoWindow *w)
     masko_window_flip(w);
 }
 
-static void handle_ipc_message(MaskoWindow *w, cJSON *msg)
+static void render_video_frame(MaskoWindow *w, PlaybackState *ps)
+{
+    cairo_surface_t *frame = masko_video_next_frame(&ps->video);
+    if (!frame) {
+        if (ps->is_looping) {
+            masko_video_rewind(&ps->video);
+            frame = masko_video_next_frame(&ps->video);
+        }
+        if (!frame) {
+            ps->is_playing = 0;
+            return;
+        }
+    }
+
+    cairo_t *cr = masko_window_back_cr(w);
+
+    cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+    cairo_paint(cr);
+
+    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+    double sx = (double)w->width  / ps->video.width;
+    double sy = (double)w->height / ps->video.height;
+    cairo_scale(cr, sx, sy);
+    cairo_set_source_surface(cr, frame, 0, 0);
+    cairo_paint(cr);
+
+    /* Reset transform so future draws aren't scaled */
+    cairo_identity_matrix(cr);
+
+    masko_window_flip(w);
+    gettimeofday(&ps->last_frame_time, NULL);
+}
+
+static void stop_playback(PlaybackState *ps)
+{
+    if (ps->is_playing) {
+        ps->is_playing = 0;
+        masko_video_close(&ps->video);
+    }
+}
+
+static void handle_ipc_message(MaskoWindow *w, PlaybackState *ps, cJSON *msg)
 {
     cJSON *cmd = cJSON_GetObjectItem(msg, "cmd");
     if (!cmd || !cJSON_IsString(cmd)) return;
@@ -60,8 +123,31 @@ static void handle_ipc_message(MaskoWindow *w, cJSON *msg)
         cJSON *jh = cJSON_GetObjectItem(msg, "height");
         if (jw && jh) {
             masko_window_resize(w, jw->valueint, jh->valueint);
-            draw_placeholder(w);
+            if (!ps->is_playing)
+                draw_placeholder(w);
         }
+    } else if (strcmp(c, "play") == 0) {
+        cJSON *jvideo = cJSON_GetObjectItem(msg, "video");
+        if (!jvideo || !cJSON_IsString(jvideo)) return;
+
+        stop_playback(ps);
+
+        if (masko_video_open(&ps->video, jvideo->valuestring) < 0) {
+            fprintf(stderr, "masko-overlay: failed to open video: %s\n",
+                    jvideo->valuestring);
+            return;
+        }
+
+        cJSON *jloop = cJSON_GetObjectItem(msg, "loop");
+        ps->is_looping = (jloop && cJSON_IsTrue(jloop)) ? 1 : 0;
+        ps->fps = masko_video_fps(&ps->video);
+        ps->is_playing = 1;
+        gettimeofday(&ps->last_frame_time, NULL);
+
+        render_video_frame(w, ps);
+    } else if (strcmp(c, "stop") == 0) {
+        stop_playback(ps);
+        draw_placeholder(w);
     }
 }
 
@@ -74,12 +160,6 @@ static void send_position_event(MaskoIPC *ipc, int x, int y)
     masko_ipc_send(ipc, msg);
     cJSON_Delete(msg);
 }
-
-typedef struct {
-    int active;
-    int start_mouse_x, start_mouse_y;
-    int start_win_x, start_win_y;
-} DragState;
 
 int main(int argc, char **argv)
 {
@@ -120,6 +200,7 @@ int main(int argc, char **argv)
     }
 
     DragState drag = {0};
+    PlaybackState playback = {0};
     int iterations = 0;
 
     while (running) {
@@ -139,7 +220,21 @@ int main(int argc, char **argv)
             if (ipc_fd > maxfd) maxfd = ipc_fd;
         }
 
-        struct timeval tv = { .tv_sec = 0, .tv_usec = 100000 };
+        /* Short timeout when playing video to hit frame deadlines */
+        long timeout_us = 100000;
+        if (playback.is_playing) {
+            double frame_ms = 1000.0 / playback.fps;
+            struct timeval now;
+            gettimeofday(&now, NULL);
+            double wait = frame_ms - elapsed_ms(&playback.last_frame_time, &now);
+            if (wait < 1.0) wait = 1.0;
+            timeout_us = (long)(wait * 1000);
+        }
+
+        struct timeval tv = {
+            .tv_sec  = timeout_us / 1000000,
+            .tv_usec = timeout_us % 1000000,
+        };
         select(maxfd + 1, &rfds, NULL, NULL, &tv);
 
         /* Process all pending X11 events */
@@ -149,7 +244,10 @@ int main(int argc, char **argv)
 
             switch (ev.type) {
             case Expose:
-                draw_placeholder(&win);
+                if (playback.is_playing)
+                    render_video_frame(&win, &playback);
+                else
+                    draw_placeholder(&win);
                 break;
 
             case ButtonPress:
@@ -184,12 +282,22 @@ int main(int argc, char **argv)
         if (ipc_connected) {
             cJSON *msg;
             while ((msg = masko_ipc_recv(&ipc)) != NULL) {
-                handle_ipc_message(&win, msg);
+                handle_ipc_message(&win, &playback, msg);
                 cJSON_Delete(msg);
             }
         }
+
+        /* Advance video frame when it's time */
+        if (playback.is_playing) {
+            struct timeval now;
+            gettimeofday(&now, NULL);
+            double frame_ms = 1000.0 / playback.fps;
+            if (elapsed_ms(&playback.last_frame_time, &now) >= frame_ms)
+                render_video_frame(&win, &playback);
+        }
     }
 
+    stop_playback(&playback);
     if (ipc_connected)
         masko_ipc_disconnect(&ipc);
     masko_window_destroy(&win);
