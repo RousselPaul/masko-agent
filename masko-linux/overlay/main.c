@@ -4,6 +4,7 @@
 #include "card_stack.h"
 #include "render.h"
 #include "permission_ui.h"
+#include "hotkeys.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -180,6 +181,15 @@ static void send_position_event(MaskoIPC *ipc, int x, int y)
     cJSON_Delete(msg);
 }
 
+static void send_hotkey_event(MaskoIPC *ipc, const char *key)
+{
+    cJSON *msg = cJSON_CreateObject();
+    cJSON_AddStringToObject(msg, "event", "hotkey");
+    cJSON_AddStringToObject(msg, "key", key);
+    masko_ipc_send(ipc, msg);
+    cJSON_Delete(msg);
+}
+
 int main(int argc, char **argv)
 {
     int test_mode = 0;
@@ -217,6 +227,10 @@ int main(int argc, char **argv)
             fprintf(stderr, "masko-overlay: IPC connect failed, running without IPC\n");
         }
     }
+
+    Hotkeys hotkeys;
+    hotkeys_init(&hotkeys, win.dpy);
+    hotkeys_grab(&hotkeys);
 
     DragState drag = {0};
     PlaybackState playback = {0};
@@ -316,6 +330,51 @@ int main(int argc, char **argv)
                         send_position_event(&ipc, win.x, win.y);
                 }
                 break;
+
+            case KeyPress: {
+                char *action = hotkeys_handle(&hotkeys, &ev.xkey);
+                if (!action) break;
+
+                if (strcmp(action, "dismiss") == 0) {
+                    CardType top = card_stack_top(&cards);
+                    if (top == CARD_PERMISSION) {
+                        permission_ui_hide(&perm);
+                        card_stack_pop(&cards, CARD_PERMISSION);
+                        need_redraw = 1;
+                    }
+                    if (ipc_connected)
+                        send_hotkey_event(&ipc, "dismiss");
+                } else if (strcmp(action, "approve") == 0) {
+                    if (perm.visible && ipc_connected) {
+                        cJSON *resp = cJSON_CreateObject();
+                        cJSON_AddStringToObject(resp, "event", "permission_response");
+                        cJSON_AddStringToObject(resp, "id", perm.perm_id);
+                        cJSON_AddStringToObject(resp, "action", "approve");
+                        masko_ipc_send(&ipc, resp);
+                        cJSON_Delete(resp);
+                        permission_ui_hide(&perm);
+                        card_stack_pop(&cards, CARD_PERMISSION);
+                        need_redraw = 1;
+                    }
+                } else if (strcmp(action, "deny") == 0) {
+                    if (perm.visible && ipc_connected) {
+                        cJSON *resp = cJSON_CreateObject();
+                        cJSON_AddStringToObject(resp, "event", "permission_response");
+                        cJSON_AddStringToObject(resp, "id", perm.perm_id);
+                        cJSON_AddStringToObject(resp, "action", "deny");
+                        masko_ipc_send(&ipc, resp);
+                        cJSON_Delete(resp);
+                        permission_ui_hide(&perm);
+                        card_stack_pop(&cards, CARD_PERMISSION);
+                        need_redraw = 1;
+                    }
+                } else if (ipc_connected) {
+                    send_hotkey_event(&ipc, action);
+                }
+
+                free(action);
+                break;
+            }
             }
         }
 
@@ -356,6 +415,7 @@ int main(int argc, char **argv)
         }
     }
 
+    hotkeys_ungrab(&hotkeys);
     stop_playback(&playback);
     if (ipc_connected)
         masko_ipc_disconnect(&ipc);
