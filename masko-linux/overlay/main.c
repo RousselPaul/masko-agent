@@ -1,6 +1,9 @@
 #include "window.h"
 #include "ipc.h"
 #include "video.h"
+#include "card_stack.h"
+#include "render.h"
+#include "permission_ui.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -102,7 +105,9 @@ static void stop_playback(PlaybackState *ps)
     }
 }
 
-static void handle_ipc_message(MaskoWindow *w, PlaybackState *ps, cJSON *msg)
+static void handle_ipc_message(MaskoWindow *w, PlaybackState *ps,
+                               CardStack *cards, PermissionUI *perm,
+                               cJSON *msg)
 {
     cJSON *cmd = cJSON_GetObjectItem(msg, "cmd");
     if (!cmd || !cJSON_IsString(cmd)) return;
@@ -148,6 +153,20 @@ static void handle_ipc_message(MaskoWindow *w, PlaybackState *ps, cJSON *msg)
     } else if (strcmp(c, "stop") == 0) {
         stop_playback(ps);
         draw_placeholder(w);
+    } else if (strcmp(c, "permission") == 0) {
+        cJSON *jtool  = cJSON_GetObjectItem(msg, "tool");
+        cJSON *jinput = cJSON_GetObjectItem(msg, "input");
+        cJSON *jid    = cJSON_GetObjectItem(msg, "id");
+        if (!jtool || !jinput || !jid) return;
+
+        permission_ui_show(perm,
+            cJSON_IsString(jtool)  ? jtool->valuestring  : "",
+            cJSON_IsString(jinput) ? jinput->valuestring : "",
+            cJSON_IsString(jid)    ? jid->valuestring    : "");
+        card_stack_push(cards, CARD_PERMISSION);
+    } else if (strcmp(c, "dismiss_permission") == 0) {
+        permission_ui_hide(perm);
+        card_stack_pop(cards, CARD_PERMISSION);
     }
 }
 
@@ -201,6 +220,11 @@ int main(int argc, char **argv)
 
     DragState drag = {0};
     PlaybackState playback = {0};
+    CardStack cards;
+    PermissionUI perm;
+    card_stack_init(&cards);
+    permission_ui_init(&perm);
+    int need_redraw = 0;
     int iterations = 0;
 
     while (running) {
@@ -244,19 +268,33 @@ int main(int argc, char **argv)
 
             switch (ev.type) {
             case Expose:
-                if (playback.is_playing)
-                    render_video_frame(&win, &playback);
-                else
-                    draw_placeholder(&win);
+                need_redraw = 1;
                 break;
 
             case ButtonPress:
                 if (ev.xbutton.button == 1) {
-                    drag.active = 1;
-                    drag.start_mouse_x = ev.xbutton.x_root;
-                    drag.start_mouse_y = ev.xbutton.y_root;
-                    drag.start_win_x   = win.x;
-                    drag.start_win_y   = win.y;
+                    int hit = permission_ui_hit_test(&perm,
+                                  ev.xbutton.x, ev.xbutton.y);
+                    if (hit) {
+                        const char *action = (hit == 1) ? "approve" : "deny";
+                        if (ipc_connected) {
+                            cJSON *resp = cJSON_CreateObject();
+                            cJSON_AddStringToObject(resp, "event", "permission_response");
+                            cJSON_AddStringToObject(resp, "id", perm.perm_id);
+                            cJSON_AddStringToObject(resp, "action", action);
+                            masko_ipc_send(&ipc, resp);
+                            cJSON_Delete(resp);
+                        }
+                        permission_ui_hide(&perm);
+                        card_stack_pop(&cards, CARD_PERMISSION);
+                        need_redraw = 1;
+                    } else {
+                        drag.active = 1;
+                        drag.start_mouse_x = ev.xbutton.x_root;
+                        drag.start_mouse_y = ev.xbutton.y_root;
+                        drag.start_win_x   = win.x;
+                        drag.start_win_y   = win.y;
+                    }
                 }
                 break;
 
@@ -265,6 +303,9 @@ int main(int argc, char **argv)
                     int nx = drag.start_win_x + (ev.xmotion.x_root - drag.start_mouse_x);
                     int ny = drag.start_win_y + (ev.xmotion.y_root - drag.start_mouse_y);
                     masko_window_move(&win, nx, ny);
+                } else if (perm.visible) {
+                    permission_ui_hover(&perm, ev.xmotion.x, ev.xmotion.y);
+                    need_redraw = 1;
                 }
                 break;
 
@@ -282,7 +323,8 @@ int main(int argc, char **argv)
         if (ipc_connected) {
             cJSON *msg;
             while ((msg = masko_ipc_recv(&ipc)) != NULL) {
-                handle_ipc_message(&win, &playback, msg);
+                handle_ipc_message(&win, &playback, &cards, &perm, msg);
+                need_redraw = 1;
                 cJSON_Delete(msg);
             }
         }
@@ -292,8 +334,25 @@ int main(int argc, char **argv)
             struct timeval now;
             gettimeofday(&now, NULL);
             double frame_ms = 1000.0 / playback.fps;
-            if (elapsed_ms(&playback.last_frame_time, &now) >= frame_ms)
+            if (elapsed_ms(&playback.last_frame_time, &now) >= frame_ms) {
                 render_video_frame(&win, &playback);
+                need_redraw = 1;
+            }
+        }
+
+        if (need_redraw) {
+            need_redraw = 0;
+
+            /* Base content (already drawn if video frame just advanced) */
+            if (!playback.is_playing)
+                draw_placeholder(&win);
+
+            /* Permission UI overlays on top of base content */
+            if (perm.visible) {
+                cairo_t *cr = masko_window_back_cr(&win);
+                permission_ui_draw(&perm, cr, win.width, win.height);
+                masko_window_flip(&win);
+            }
         }
     }
 
