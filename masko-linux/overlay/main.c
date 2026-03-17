@@ -4,6 +4,8 @@
 #include "card_stack.h"
 #include "render.h"
 #include "permission_ui.h"
+#include "toast.h"
+#include "session_switcher.h"
 #include "hotkeys.h"
 
 #include <stdio.h>
@@ -108,6 +110,7 @@ static void stop_playback(PlaybackState *ps)
 
 static void handle_ipc_message(MaskoWindow *w, PlaybackState *ps,
                                CardStack *cards, PermissionUI *perm,
+                               ToastUI *toast, SessionSwitcherUI *switcher,
                                cJSON *msg)
 {
     cJSON *cmd = cJSON_GetObjectItem(msg, "cmd");
@@ -168,6 +171,23 @@ static void handle_ipc_message(MaskoWindow *w, PlaybackState *ps,
     } else if (strcmp(c, "dismiss_permission") == 0) {
         permission_ui_hide(perm);
         card_stack_pop(cards, CARD_PERMISSION);
+    } else if (strcmp(c, "toast") == 0) {
+        cJSON *jtext = cJSON_GetObjectItem(msg, "text");
+        cJSON *jdur  = cJSON_GetObjectItem(msg, "duration");
+        if (!jtext || !cJSON_IsString(jtext)) return;
+        int dur = (jdur && cJSON_IsNumber(jdur)) ? jdur->valueint : 3000;
+        toast_show(toast, jtext->valuestring, dur);
+        card_stack_push(cards, CARD_TOAST);
+    } else if (strcmp(c, "session_switcher") == 0) {
+        cJSON *jsessions = cJSON_GetObjectItem(msg, "sessions");
+        cJSON *jselected = cJSON_GetObjectItem(msg, "selected");
+        int sel = (jselected && cJSON_IsNumber(jselected)) ? jselected->valueint : 0;
+        session_switcher_show(switcher, jsessions, sel);
+        card_stack_push(cards, CARD_SESSION_SWITCHER);
+    } else if (strcmp(c, "session_switcher_nav") == 0) {
+        cJSON *jdir = cJSON_GetObjectItem(msg, "direction");
+        if (jdir && cJSON_IsString(jdir))
+            session_switcher_nav(switcher, jdir->valuestring);
     }
 }
 
@@ -236,10 +256,16 @@ int main(int argc, char **argv)
     PlaybackState playback = {0};
     CardStack cards;
     PermissionUI perm;
+    ToastUI toast;
+    SessionSwitcherUI switcher;
     card_stack_init(&cards);
     permission_ui_init(&perm);
+    toast_init(&toast);
+    session_switcher_init(&switcher);
     int need_redraw = 0;
     int iterations = 0;
+    struct timeval last_tick;
+    gettimeofday(&last_tick, NULL);
 
     while (running) {
         if (test_mode && ++iterations > 50)
@@ -258,8 +284,10 @@ int main(int argc, char **argv)
             if (ipc_fd > maxfd) maxfd = ipc_fd;
         }
 
-        /* Short timeout when playing video to hit frame deadlines */
+        /* Short timeout when playing video or toast is active */
         long timeout_us = 100000;
+        if (toast.visible)
+            timeout_us = 50000;
         if (playback.is_playing) {
             double frame_ms = 1000.0 / playback.fps;
             struct timeval now;
@@ -287,10 +315,26 @@ int main(int argc, char **argv)
 
             case ButtonPress:
                 if (ev.xbutton.button == 1) {
-                    int hit = permission_ui_hit_test(&perm,
-                                  ev.xbutton.x, ev.xbutton.y);
-                    if (hit) {
-                        const char *action = (hit == 1) ? "approve" : "deny";
+                    int sw_hit = session_switcher_hit_test(&switcher,
+                                     ev.xbutton.x, ev.xbutton.y,
+                                     win.width, win.height);
+                    int perm_hit = permission_ui_hit_test(&perm,
+                                       ev.xbutton.x, ev.xbutton.y);
+
+                    if (sw_hit >= 0) {
+                        if (ipc_connected) {
+                            cJSON *resp = cJSON_CreateObject();
+                            cJSON_AddStringToObject(resp, "event", "hotkey");
+                            cJSON_AddStringToObject(resp, "key", "session_confirm");
+                            cJSON_AddNumberToObject(resp, "index", sw_hit);
+                            masko_ipc_send(&ipc, resp);
+                            cJSON_Delete(resp);
+                        }
+                        session_switcher_hide(&switcher);
+                        card_stack_pop(&cards, CARD_SESSION_SWITCHER);
+                        need_redraw = 1;
+                    } else if (perm_hit) {
+                        const char *action = (perm_hit == 1) ? "approve" : "deny";
                         if (ipc_connected) {
                             cJSON *resp = cJSON_CreateObject();
                             cJSON_AddStringToObject(resp, "event", "permission_response");
@@ -337,7 +381,11 @@ int main(int argc, char **argv)
 
                 if (strcmp(action, "dismiss") == 0) {
                     CardType top = card_stack_top(&cards);
-                    if (top == CARD_PERMISSION) {
+                    if (top == CARD_SESSION_SWITCHER) {
+                        session_switcher_hide(&switcher);
+                        card_stack_pop(&cards, CARD_SESSION_SWITCHER);
+                        need_redraw = 1;
+                    } else if (top == CARD_PERMISSION) {
                         permission_ui_hide(&perm);
                         card_stack_pop(&cards, CARD_PERMISSION);
                         need_redraw = 1;
@@ -382,19 +430,34 @@ int main(int argc, char **argv)
         if (ipc_connected) {
             cJSON *msg;
             while ((msg = masko_ipc_recv(&ipc)) != NULL) {
-                handle_ipc_message(&win, &playback, &cards, &perm, msg);
+                handle_ipc_message(&win, &playback, &cards, &perm, &toast, &switcher, msg);
                 need_redraw = 1;
                 cJSON_Delete(msg);
             }
         }
 
+        /* Compute delta since last tick */
+        struct timeval tick_now;
+        gettimeofday(&tick_now, NULL);
+        int delta_ms = (int)elapsed_ms(&last_tick, &tick_now);
+        last_tick = tick_now;
+
         /* Advance video frame when it's time */
         if (playback.is_playing) {
-            struct timeval now;
-            gettimeofday(&now, NULL);
             double frame_ms = 1000.0 / playback.fps;
-            if (elapsed_ms(&playback.last_frame_time, &now) >= frame_ms) {
+            if (elapsed_ms(&playback.last_frame_time, &tick_now) >= frame_ms) {
                 render_video_frame(&win, &playback);
+                need_redraw = 1;
+            }
+        }
+
+        /* Tick toast timer */
+        if (toast.visible) {
+            if (!toast_tick(&toast, delta_ms)) {
+                toast_hide(&toast);
+                card_stack_pop(&cards, CARD_TOAST);
+                need_redraw = 1;
+            } else {
                 need_redraw = 1;
             }
         }
@@ -402,16 +465,23 @@ int main(int argc, char **argv)
         if (need_redraw) {
             need_redraw = 0;
 
-            /* Base content (already drawn if video frame just advanced) */
+            /* Base content */
             if (!playback.is_playing)
                 draw_placeholder(&win);
 
-            /* Permission UI overlays on top of base content */
-            if (perm.visible) {
-                cairo_t *cr = masko_window_back_cr(&win);
+            cairo_t *cr = masko_window_back_cr(&win);
+
+            /* Draw order: video/placeholder -> toast -> permission -> session_switcher */
+            if (toast.visible)
+                toast_draw(&toast, cr, win.width, win.height);
+
+            if (perm.visible)
                 permission_ui_draw(&perm, cr, win.width, win.height);
-                masko_window_flip(&win);
-            }
+
+            if (switcher.visible)
+                session_switcher_draw(&switcher, cr, win.width, win.height);
+
+            masko_window_flip(&win);
         }
     }
 
