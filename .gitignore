@@ -6,3 +6,6 @@ Package.resolved
 *.xcodeproj
 xcuserdata/
 DerivedData/
+.venv/
+__pycache__/
+*.pyc
