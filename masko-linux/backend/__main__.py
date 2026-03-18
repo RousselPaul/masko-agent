@@ -119,13 +119,17 @@ class Orchestrator:
 
     def _wire_state_machine(self):
         def on_transition(edge, video_url):
+            logger.info("State transition → %s, video: %s", edge.get("target", "?"), video_url)
             resolved = self.video_cache.resolve(video_url)
+            logger.info("Resolved video: %s", resolved)
             asyncio.ensure_future(self.ipc.send({
                 "cmd": "play", "video": resolved, "loop": False,
             }))
 
         def on_loop_start(video_url):
+            logger.info("Loop start, video: %s", video_url)
             resolved = self.video_cache.resolve(video_url)
+            logger.info("Resolved loop video: %s", resolved)
             asyncio.ensure_future(self.ipc.send({
                 "cmd": "play", "video": resolved, "loop": True,
             }))

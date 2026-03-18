@@ -90,9 +90,9 @@ cairo_surface_t *masko_video_next_frame(MaskoVideo *v)
                       v->frame->linesize, 0, v->height,
                       v->frame_rgba->data, v->frame_rgba->linesize);
 
-            /* Chroma-key: the mascot videos have a light blue background
-               (approx R=160 G=212 B=224) baked in as opaque pixels.
-               Make those pixels transparent so the mascot floats. */
+            /* Chroma-key: the mascot videos have a teal/cyan background
+               that varies in brightness but stays in the cyan hue range.
+               Use HSV-based keying to catch all variants. */
             int stride = v->frame_rgba->linesize[0];
             for (int y = 0; y < v->height; y++) {
                 uint8_t *row = v->rgba_buf + y * stride;
@@ -100,22 +100,46 @@ cairo_surface_t *masko_video_next_frame(MaskoVideo *v)
                     uint8_t b = row[x * 4 + 0];
                     uint8_t g = row[x * 4 + 1];
                     uint8_t r = row[x * 4 + 2];
-                    int dr = (int)r - 160;
-                    int dg = (int)g - 212;
-                    int db = (int)b - 224;
-                    int dist_sq = dr * dr + dg * dg + db * db;
-                    /* Hard cutoff with soft edge for anti-aliasing */
-                    if (dist_sq < 900) {
-                        row[x * 4 + 3] = 0; /* fully transparent */
-                    } else if (dist_sq < 2500) {
-                        /* Fade alpha near the boundary for smooth edges */
-                        float t = (float)(dist_sq - 900) / 1600.0f;
-                        row[x * 4 + 3] = (uint8_t)(t * 255.0f);
-                        /* Pre-multiply alpha for Cairo ARGB32 */
-                        float a = t;
-                        row[x * 4 + 0] = (uint8_t)(row[x * 4 + 0] * a);
-                        row[x * 4 + 1] = (uint8_t)(row[x * 4 + 1] * a);
-                        row[x * 4 + 2] = (uint8_t)(row[x * 4 + 2] * a);
+
+                    /* RGB to HSV — only need hue and saturation */
+                    int mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+                    int mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+                    int delta = mx - mn;
+
+                    if (delta == 0 || mx == 0) continue; /* grey/black — not background */
+
+                    float sat = (float)delta / mx;
+                    if (sat < 0.08f) continue; /* too unsaturated — not the teal bg */
+
+                    float hue;
+                    if (mx == (int)r)
+                        hue = 60.0f * (float)((int)g - (int)b) / delta;
+                    else if (mx == (int)g)
+                        hue = 60.0f * (2.0f + (float)((int)b - (int)r) / delta);
+                    else
+                        hue = 60.0f * (4.0f + (float)((int)r - (int)g) / delta);
+                    if (hue < 0) hue += 360.0f;
+
+                    /* The teal/cyan background hue is ~170-200 degrees.
+                       Key anything in that range with sufficient brightness. */
+                    int is_bg = (hue >= 160.0f && hue <= 210.0f && mx > 100);
+
+                    if (is_bg) {
+                        /* Distance from hue center (185) for soft edge */
+                        float hue_dist = hue < 185.0f ? 185.0f - hue : hue - 185.0f;
+                        float edge = 1.0f;
+                        if (hue_dist > 15.0f)
+                            edge = (25.0f - hue_dist) / 10.0f;
+                        if (edge > 1.0f) edge = 1.0f;
+
+                        if (edge <= 0.0f) continue;
+
+                        float alpha = 1.0f - edge;
+                        row[x * 4 + 3] = (uint8_t)(alpha * 255.0f);
+                        /* Pre-multiply for Cairo ARGB32 */
+                        row[x * 4 + 0] = (uint8_t)(b * alpha);
+                        row[x * 4 + 1] = (uint8_t)(g * alpha);
+                        row[x * 4 + 2] = (uint8_t)(r * alpha);
                     }
                 }
             }
