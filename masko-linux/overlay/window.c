@@ -6,6 +6,7 @@
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/Xcomposite.h>
+#include <X11/extensions/shape.h>
 #include <cairo/cairo-xlib.h>
 
 static Visual *find_argb_visual(Display *dpy, int screen)
@@ -155,12 +156,67 @@ void masko_window_resize(MaskoWindow *w, int width, int height)
     XFlush(w->dpy);
 }
 
+#define SHAPE_BLOCK 8
+#define ALPHA_THRESHOLD 10
+
+static void update_input_shape(MaskoWindow *w)
+{
+    cairo_surface_flush(w->back_surface);
+    unsigned char *data = cairo_image_surface_get_data(w->back_surface);
+    int stride = cairo_image_surface_get_stride(w->back_surface);
+
+    int cols = (w->width  + SHAPE_BLOCK - 1) / SHAPE_BLOCK;
+    int rows = (w->height + SHAPE_BLOCK - 1) / SHAPE_BLOCK;
+    int max_rects = cols * rows;
+
+    XRectangle *rects = malloc(max_rects * sizeof(XRectangle));
+    if (!rects) return;
+    int n = 0;
+
+    for (int by = 0; by < rows; by++) {
+        int py = by * SHAPE_BLOCK;
+        int bh = SHAPE_BLOCK;
+        if (py + bh > w->height) bh = w->height - py;
+
+        for (int bx = 0; bx < cols; bx++) {
+            int px = bx * SHAPE_BLOCK;
+            int bw = SHAPE_BLOCK;
+            if (px + bw > w->width) bw = w->width - px;
+
+            int has_opaque = 0;
+            for (int y = py; y < py + bh && !has_opaque; y++) {
+                unsigned char *row = data + y * stride + px * 4;
+                for (int x = 0; x < bw; x++) {
+                    /* ARGB32: bytes are [B, G, R, A] on little-endian */
+                    if (row[x * 4 + 3] > ALPHA_THRESHOLD) {
+                        has_opaque = 1;
+                        break;
+                    }
+                }
+            }
+
+            if (has_opaque) {
+                rects[n].x      = px;
+                rects[n].y      = py;
+                rects[n].width  = bw;
+                rects[n].height = bh;
+                n++;
+            }
+        }
+    }
+
+    XShapeCombineRectangles(w->dpy, w->win, ShapeInput,
+                            0, 0, rects, n, ShapeSet, YXBanded);
+    free(rects);
+}
+
 void masko_window_flip(MaskoWindow *w)
 {
     cairo_set_operator(w->front_cr, CAIRO_OPERATOR_SOURCE);
     cairo_set_source_surface(w->front_cr, w->back_surface, 0, 0);
     cairo_paint(w->front_cr);
     cairo_surface_flush(w->front_surface);
+    update_input_shape(w);
     XFlush(w->dpy);
 }
 
