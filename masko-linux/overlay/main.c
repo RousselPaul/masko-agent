@@ -161,13 +161,23 @@ static void handle_ipc_message(MaskoWindow *w, PlaybackState *ps,
         cJSON *jtool  = cJSON_GetObjectItem(msg, "tool");
         cJSON *jinput = cJSON_GetObjectItem(msg, "input");
         cJSON *jid    = cJSON_GetObjectItem(msg, "id");
-        if (!jtool || !jinput || !jid) return;
+        fprintf(stderr, "masko-overlay: permission IPC received "
+                "(tool=%s, id=%s, has_input=%d)\n",
+                jtool  ? (cJSON_IsString(jtool) ? jtool->valuestring : "<non-str>") : "<null>",
+                jid    ? (cJSON_IsString(jid)   ? jid->valuestring   : "<non-str>") : "<null>",
+                jinput != NULL);
+        if (!jtool || !jinput || !jid) {
+            fprintf(stderr, "masko-overlay: permission missing fields, ignoring\n");
+            return;
+        }
 
         permission_ui_show(perm,
             cJSON_IsString(jtool)  ? jtool->valuestring  : "",
             cJSON_IsString(jinput) ? jinput->valuestring : "",
             cJSON_IsString(jid)    ? jid->valuestring    : "");
         card_stack_push(cards, CARD_PERMISSION);
+        fprintf(stderr, "masko-overlay: permission_ui_show done, perm->visible=%d, "
+                "card_top=%d\n", perm->visible, card_stack_top(cards));
     } else if (strcmp(c, "dismiss_permission") == 0) {
         permission_ui_hide(perm);
         card_stack_pop(cards, CARD_PERMISSION);
@@ -483,8 +493,12 @@ int main(int argc, char **argv)
             if (toast.visible)
                 toast_draw(&toast, cr, win.width, win.height);
 
-            if (perm.visible)
+            if (perm.visible) {
+                fprintf(stderr, "masko-overlay: drawing permission UI "
+                        "(win %dx%d, tool='%s')\n",
+                        win.width, win.height, perm.tool_name);
                 permission_ui_draw(&perm, cr, win.width, win.height);
+            }
 
             if (switcher.visible)
                 session_switcher_draw(&switcher, cr, win.width, win.height);
