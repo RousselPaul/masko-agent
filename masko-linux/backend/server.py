@@ -53,6 +53,31 @@ def create_app(config=None):
     return app
 
 
+def create_dashboard_app(hook_app):
+    """Build a dashboard app that shares stores with the hook app."""
+    app = web.Application()
+    app["config"] = hook_app["config"]
+    app["event_store"] = hook_app["event_store"]
+    app["session_store"] = hook_app["session_store"]
+    app["notification_store"] = hook_app["notification_store"]
+    app["permission_store"] = hook_app["permission_store"]
+    app["state_machine"] = hook_app.get("state_machine")
+    app["websockets"] = weakref.WeakSet()
+
+    app.router.add_get("/health", handle_health)
+    app.router.add_get("/api/sessions", handle_api_sessions)
+    app.router.add_get("/api/events", handle_api_events)
+    app.router.add_get("/api/notifications", handle_api_notifications)
+    app.router.add_get("/api/config", handle_api_config)
+    app.router.add_post("/api/notifications/{id}/read", handle_notif_read)
+    app.router.add_post("/api/notifications/clear", handle_notif_clear)
+    app.router.add_get("/ws", handle_websocket)
+    app.router.add_get("/", handle_dashboard)
+    app.router.add_static("/dashboard/", DASHBOARD_DIR)
+
+    return app
+
+
 async def handle_health(request):
     return web.Response(text="ok")
 

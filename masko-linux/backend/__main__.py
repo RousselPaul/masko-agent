@@ -11,6 +11,7 @@ from backend.config import Config
 from backend.event_processor import EventProcessor
 from backend.ipc import IPCServer
 from backend.models import ClaudeEvent, HookEventType
+from backend.server import create_dashboard_app
 from backend.state_machine import ConditionValue, StateMachine
 from backend.stores.event import EventStore
 from backend.stores.notification import NotificationStore
@@ -319,12 +320,30 @@ async def main():
             sys.exit(1)
         raise
 
-    logger.info("Masko backend listening on 127.0.0.1:%d", config.hook_port)
+    logger.info("Masko hook server listening on 127.0.0.1:%d", config.hook_port)
+
+    dashboard_app = create_dashboard_app(orchestrator.app)
+    dashboard_runner = web.AppRunner(dashboard_app)
+    await dashboard_runner.setup()
+    try:
+        dashboard_site = web.TCPSite(dashboard_runner, "127.0.0.1", config.dashboard_port)
+        await dashboard_site.start()
+    except OSError as e:
+        if "Address already in use" in str(e) or e.errno == 98:
+            logger.warning("Dashboard port %d already in use, skipping dashboard", config.dashboard_port)
+            dashboard_runner = None
+        else:
+            raise
+
+    if dashboard_runner:
+        logger.info("Masko dashboard listening on 127.0.0.1:%d", config.dashboard_port)
 
     await shutdown_event.wait()
 
     logger.info("Shutting down...")
     await orchestrator.shutdown()
+    if dashboard_runner:
+        await dashboard_runner.cleanup()
     await runner.cleanup()
 
 
