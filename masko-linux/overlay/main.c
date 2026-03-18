@@ -375,6 +375,14 @@ int main(int argc, char **argv)
                 }
                 break;
 
+            case KeyRelease: {
+                char *action = hotkeys_handle_release(&hotkeys, &ev.xkey);
+                if (action && ipc_connected)
+                    send_hotkey_event(&ipc, action);
+                free(action);
+                break;
+            }
+
             case KeyPress: {
                 char *action = hotkeys_handle(&hotkeys, &ev.xkey);
                 if (!action) break;

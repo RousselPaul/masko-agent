@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <X11/keysym.h>
 
 void hotkeys_init(Hotkeys *hk, Display *dpy)
@@ -31,6 +32,11 @@ void hotkeys_init(Hotkeys *hk, Display *dpy)
     hk->key_up   = XKeysymToKeycode(dpy, XK_Up);
     hk->key_down = XKeysymToKeycode(dpy, XK_Down);
     hk->key_tab  = XKeysymToKeycode(dpy, XK_Tab);
+
+    hk->key_super_l   = XKeysymToKeycode(dpy, XK_Super_L);
+    hk->super_held     = 0;
+    hk->super_tainted  = 0;
+    hk->has_last_tap   = 0;
 }
 
 /* Suppress BadAccess errors from XGrabKey when another app owns the combo */
@@ -93,6 +99,9 @@ void hotkeys_grab(Hotkeys *hk)
     grab_key(hk->dpy, hk->root, hk->key_tab, mod);
     grab_key(hk->dpy, hk->root, hk->key_tab, mod | ShiftMask);
 
+    /* Bare Super_L for double-tap detection */
+    grab_key(hk->dpy, hk->root, hk->key_super_l, 0);
+
     XFlush(hk->dpy);
 }
 
@@ -118,6 +127,8 @@ void hotkeys_ungrab(Hotkeys *hk)
     ungrab_key(hk->dpy, hk->root, hk->key_tab, mod);
     ungrab_key(hk->dpy, hk->root, hk->key_tab, mod | ShiftMask);
 
+    ungrab_key(hk->dpy, hk->root, hk->key_super_l, 0);
+
     XFlush(hk->dpy);
 }
 
@@ -132,6 +143,17 @@ char *hotkeys_handle(Hotkeys *hk, XKeyEvent *ev)
     KeyCode kc = ev->keycode;
     unsigned int mods = clean_mods(ev->state);
     unsigned int super = hk->modifier;
+
+    /* Track Super_L press for double-tap detection */
+    if (kc == hk->key_super_l) {
+        hk->super_held    = 1;
+        hk->super_tainted = 0;
+        return NULL;
+    }
+
+    /* Any other key while Super is held taints the tap */
+    if (hk->super_held)
+        hk->super_tainted = 1;
 
     /* Escape without modifier -> dismiss */
     if (kc == hk->key_escape && mods == 0)
@@ -167,5 +189,40 @@ char *hotkeys_handle(Hotkeys *hk, XKeyEvent *ev)
     if (mods == (super | ShiftMask) && kc == hk->key_tab)
         return strdup("session_nav_prev");
 
+    return NULL;
+}
+
+static double timeval_diff_ms(struct timeval *a, struct timeval *b)
+{
+    return (b->tv_sec - a->tv_sec) * 1000.0
+         + (b->tv_usec - a->tv_usec) / 1000.0;
+}
+
+#define DOUBLE_TAP_MS 300
+
+char *hotkeys_handle_release(Hotkeys *hk, XKeyEvent *ev)
+{
+    if (ev->keycode != hk->key_super_l)
+        return NULL;
+
+    hk->super_held = 0;
+
+    /* If another key was pressed while Super was held, not a clean tap */
+    if (hk->super_tainted)
+        return NULL;
+
+    struct timeval now;
+    gettimeofday(&now, NULL);
+
+    if (hk->has_last_tap) {
+        double gap = timeval_diff_ms(&hk->last_super_tap, &now);
+        if (gap <= DOUBLE_TAP_MS) {
+            hk->has_last_tap = 0;
+            return strdup("session_switcher");
+        }
+    }
+
+    hk->last_super_tap = now;
+    hk->has_last_tap   = 1;
     return NULL;
 }
