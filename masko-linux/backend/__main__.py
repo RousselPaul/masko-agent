@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -276,6 +277,7 @@ class Orchestrator:
             str(OVERLAY_BIN), "--sock", SOCK_PATH,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         logger.info("Overlay spawned (pid=%d)", self.overlay_process.pid)
 
@@ -316,19 +318,29 @@ class Orchestrator:
 
     async def shutdown(self):
         self._shutdown = True
-        if self.overlay_process and self.overlay_process.returncode is None:
-            self.overlay_process.terminate()
-            try:
-                await asyncio.wait_for(self.overlay_process.wait(), timeout=3)
-            except asyncio.TimeoutError:
-                self.overlay_process.kill()
-
-        self.app["permission_store"].deny_all()
-        await self.ipc.stop()
 
         monitor = self.app.get("_monitor_task")
         if monitor and not monitor.done():
             monitor.cancel()
+
+        if self.overlay_process and self.overlay_process.returncode is None:
+            pid = self.overlay_process.pid
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except OSError:
+                self.overlay_process.terminate()
+            try:
+                await asyncio.wait_for(self.overlay_process.wait(), timeout=2)
+            except asyncio.TimeoutError:
+                logger.warning("Overlay did not exit after SIGTERM, sending SIGKILL")
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except OSError:
+                    self.overlay_process.kill()
+                await self.overlay_process.wait()
+
+        self.app["permission_store"].deny_all()
+        await self.ipc.stop()
 
 
 def parse_args():
