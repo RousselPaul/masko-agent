@@ -150,10 +150,9 @@ class Orchestrator:
         if ipc:
             await ipc.send({
                 "cmd": "permission",
-                "tool_use_id": permission.tool_use_id,
-                "tool_name": permission.tool_name,
-                "tool_input": permission.tool_input,
-                "session_id": permission.session_id,
+                "tool": permission.tool_name,
+                "input": json.dumps(permission.tool_input) if isinstance(permission.tool_input, dict) else str(permission.tool_input),
+                "id": permission.tool_use_id,
             })
 
         try:
@@ -174,7 +173,7 @@ class Orchestrator:
             self.state_machine.start()
 
         elif msg_type == "permission_response":
-            tool_use_id = msg.get("tool_use_id")
+            tool_use_id = msg.get("id") or msg.get("tool_use_id")
             action = msg.get("action", "deny")
             if tool_use_id:
                 self.app["permission_store"].resolve(tool_use_id, action)
@@ -269,14 +268,23 @@ class Orchestrator:
             monitor.cancel()
 
 
+def parse_args():
+    import argparse
+    parser = argparse.ArgumentParser(description="Masko Desktop backend")
+    parser.add_argument("--config", help="Path to config JSON file")
+    return parser.parse_args()
+
+
 async def main():
+    args = parse_args()
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         stream=sys.stderr,
     )
 
-    config = Config()
+    config = Config(path=args.config)
     orchestrator = Orchestrator(config)
 
     loop = asyncio.get_event_loop()
