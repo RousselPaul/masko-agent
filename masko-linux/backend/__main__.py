@@ -19,6 +19,7 @@ from backend.stores.permission import PendingPermission, PendingPermissionStore
 from backend.stores.session import SessionStore
 from backend.stores.session_finished import SessionFinishedStore
 from backend.stores.session_switcher import SessionSwitcherStore
+from backend.terminal_focus import focus_terminal
 from backend.video_cache import VideoCache
 
 logger = logging.getLogger("masko")
@@ -55,6 +56,9 @@ def create_orchestrated_app(config, state_machine, event_processor, ipc, orchest
 
         if event.event_type == HookEventType.PERMISSION_REQUEST:
             return await orchestrator.handle_permission_request(request.app, event)
+
+        if event.event_type == HookEventType.SESSION_END:
+            await orchestrator.handle_session_end(event)
 
         return web.Response(text="ok")
 
@@ -201,13 +205,67 @@ class Orchestrator:
         elif msg_type == "loop_completed":
             self.state_machine.handle_loop_completed()
 
+    async def handle_session_end(self, event):
+        session = self.event_processor.session_store.get(event.session_id)
+        if not session:
+            return
+        toast = self.session_finished.make_toast_data(session)
+        await self.ipc.send({"cmd": "toast", **toast})
+
     async def _handle_hotkey(self, key):
         if key == "toggle":
             pass
+        elif key == "session_switcher":
+            await self._toggle_session_switcher()
         elif key == "session_next":
             self.session_switcher.nav("next")
+            await self._send_session_switcher_nav()
         elif key == "session_prev":
             self.session_switcher.nav("prev")
+            await self._send_session_switcher_nav()
+        elif key == "session_confirm":
+            await self._confirm_session_switch()
+
+    async def _toggle_session_switcher(self):
+        if self.session_switcher.is_open:
+            self.session_switcher.close()
+            await self.ipc.send({"cmd": "session_switcher", "action": "close"})
+            return
+
+        sessions = self.event_processor.session_store.active_sessions()
+        if not sessions:
+            return
+        self.session_switcher.open([
+            {"id": s.id, "cwd": s.cwd or "", "model": s.model or ""}
+            for s in sessions
+        ])
+        await self.ipc.send({
+            "cmd": "session_switcher",
+            "action": "open",
+            "sessions": self.session_switcher.sessions,
+            "selected": self.session_switcher.selected,
+        })
+
+    async def _send_session_switcher_nav(self):
+        if not self.session_switcher.is_open:
+            return
+        await self.ipc.send({
+            "cmd": "session_switcher",
+            "action": "nav",
+            "selected": self.session_switcher.selected,
+        })
+
+    async def _confirm_session_switch(self):
+        if not self.session_switcher.is_open or not self.session_switcher.sessions:
+            return
+        selected = self.session_switcher.sessions[self.session_switcher.selected]
+        self.session_switcher.close()
+        await self.ipc.send({"cmd": "session_switcher", "action": "close"})
+
+        active = self.event_processor.session_store.active_sessions()
+        target = next((s for s in active if s.id == selected["id"]), None)
+        if target and target.terminal_pid:
+            focus_terminal(target.terminal_pid)
 
     async def _spawn_overlay(self):
         if not OVERLAY_BIN.exists():
