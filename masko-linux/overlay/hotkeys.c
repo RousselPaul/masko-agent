@@ -33,14 +33,30 @@ void hotkeys_init(Hotkeys *hk, Display *dpy)
     hk->key_tab  = XKeysymToKeycode(dpy, XK_Tab);
 }
 
+/* Suppress BadAccess errors from XGrabKey when another app owns the combo */
+static int grab_error_occurred = 0;
+static int grab_error_handler(Display *dpy, XErrorEvent *ev)
+{
+    (void)dpy;
+    if (ev->error_code == BadAccess)
+        grab_error_occurred = 1;
+    return 0;
+}
+
 /* Grab a single key with all NumLock/CapsLock combos */
 static void grab_key(Display *dpy, Window root, KeyCode key, unsigned int mod)
 {
     unsigned int lock_masks[] = { 0, LockMask, Mod2Mask, LockMask | Mod2Mask };
+    XErrorHandler old = XSetErrorHandler(grab_error_handler);
     for (int i = 0; i < 4; i++) {
+        grab_error_occurred = 0;
         XGrabKey(dpy, key, mod | lock_masks[i], root, True,
                  GrabModeAsync, GrabModeAsync);
+        XSync(dpy, False);
+        if (grab_error_occurred)
+            fprintf(stderr, "masko-overlay: could not grab key (already taken), skipping\n");
     }
+    XSetErrorHandler(old);
 }
 
 static void ungrab_key(Display *dpy, Window root, KeyCode key, unsigned int mod)
@@ -60,8 +76,8 @@ void hotkeys_grab(Hotkeys *hk)
     grab_key(hk->dpy, hk->root, hk->key_deny,     mod);
     grab_key(hk->dpy, hk->root, hk->key_collapse, mod);
 
-    /* Escape without modifier */
-    grab_key(hk->dpy, hk->root, hk->key_escape, 0);
+    /* Skip grabbing bare Escape — DEs use it, and the overlay receives
+       Escape via its own window's KeyPress events anyway */
 
     /* Super+1 through Super+9 */
     KeyCode numkeys[] = {
@@ -88,7 +104,7 @@ void hotkeys_ungrab(Hotkeys *hk)
     ungrab_key(hk->dpy, hk->root, hk->key_approve,  mod);
     ungrab_key(hk->dpy, hk->root, hk->key_deny,     mod);
     ungrab_key(hk->dpy, hk->root, hk->key_collapse, mod);
-    ungrab_key(hk->dpy, hk->root, hk->key_escape, 0);
+    /* bare Escape not grabbed, nothing to ungrab */
 
     KeyCode numkeys[] = {
         hk->key_1, hk->key_2, hk->key_3, hk->key_4, hk->key_5,
