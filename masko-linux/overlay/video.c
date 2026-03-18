@@ -89,6 +89,37 @@ cairo_surface_t *masko_video_next_frame(MaskoVideo *v)
             sws_scale(v->sws_ctx, (const uint8_t *const *)v->frame->data,
                       v->frame->linesize, 0, v->height,
                       v->frame_rgba->data, v->frame_rgba->linesize);
+
+            /* Chroma-key: the mascot videos have a light blue background
+               (approx R=160 G=212 B=224) baked in as opaque pixels.
+               Make those pixels transparent so the mascot floats. */
+            int stride = v->frame_rgba->linesize[0];
+            for (int y = 0; y < v->height; y++) {
+                uint8_t *row = v->rgba_buf + y * stride;
+                for (int x = 0; x < v->width; x++) {
+                    uint8_t b = row[x * 4 + 0];
+                    uint8_t g = row[x * 4 + 1];
+                    uint8_t r = row[x * 4 + 2];
+                    int dr = (int)r - 160;
+                    int dg = (int)g - 212;
+                    int db = (int)b - 224;
+                    int dist_sq = dr * dr + dg * dg + db * db;
+                    /* Hard cutoff with soft edge for anti-aliasing */
+                    if (dist_sq < 900) {
+                        row[x * 4 + 3] = 0; /* fully transparent */
+                    } else if (dist_sq < 2500) {
+                        /* Fade alpha near the boundary for smooth edges */
+                        float t = (float)(dist_sq - 900) / 1600.0f;
+                        row[x * 4 + 3] = (uint8_t)(t * 255.0f);
+                        /* Pre-multiply alpha for Cairo ARGB32 */
+                        float a = t;
+                        row[x * 4 + 0] = (uint8_t)(row[x * 4 + 0] * a);
+                        row[x * 4 + 1] = (uint8_t)(row[x * 4 + 1] * a);
+                        row[x * 4 + 2] = (uint8_t)(row[x * 4 + 2] * a);
+                    }
+                }
+            }
+
             cairo_surface_mark_dirty(v->surface);
             return v->surface;
         }
