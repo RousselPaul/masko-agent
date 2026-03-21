@@ -523,6 +523,16 @@ final class PendingPermissionStore {
         silentRemove(id: perm.id)
     }
 
+    func denyFirstPending(forSessionId sessionId: String) {
+        guard let perm = pending.first(where: { $0.event.sessionId == sessionId }) else { return }
+        resolve(id: perm.id, decision: .deny)
+    }
+
+    func denyByEventId(_ eventId: UUID) {
+        guard let perm = pending.first(where: { $0.event.id == eventId }) else { return }
+        resolve(id: perm.id, decision: .deny)
+    }
+
     /// Remove a permission silently (answered from terminal or connection closed)
     private func silentRemove(id: UUID) {
         guard let index = pending.firstIndex(where: { $0.id == id }) else { return }

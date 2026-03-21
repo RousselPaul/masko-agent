@@ -378,16 +378,40 @@ final class AppStore {
             }
         }
 
-        // Update permission notification with resolution outcome
+        // Match by eventId first (precise), fall back to sessionId (old notifications without eventId)
         pendingPermissionStore.onResolved = { [weak self] event, outcome in
             guard let self else { return }
-            for notification in self.notificationStore.notifications where
-                notification.resolutionOutcome == .pending &&
-                notification.category == .permissionRequest &&
-                notification.sessionId == event.sessionId {
-                self.notificationStore.updateResolution(notification.id, outcome: outcome)
-                break
+            if let match = self.notificationStore.notifications.first(where: {
+                $0.resolutionOutcome == .pending &&
+                $0.category == .permissionRequest &&
+                $0.eventId == event.id
+            }) {
+                self.notificationStore.updateResolution(match.id, outcome: outcome)
+                return
             }
+            if let match = self.notificationStore.notifications.first(where: {
+                $0.resolutionOutcome == .pending &&
+                $0.category == .permissionRequest &&
+                $0.eventId == nil &&
+                $0.sessionId == event.sessionId
+            }) {
+                self.notificationStore.updateResolution(match.id, outcome: outcome)
+            }
+        }
+    }
+
+    /// Deny a pending approval from the Approvals dashboard.
+    /// Always updates the notification directly — the PendingPermission may already
+    /// be gone if the user answered from the terminal.
+    func dismissApproval(notification: AppNotification) {
+        // Check current store state — the view's snapshot may be stale
+        guard let current = notificationStore.notifications.first(where: { $0.id == notification.id }),
+              current.resolutionOutcome == .pending else { return }
+        notificationStore.updateResolution(notification.id, outcome: .denied)
+        if let eventId = notification.eventId {
+            pendingPermissionStore.denyByEventId(eventId)
+        } else if let sessionId = notification.sessionId {
+            pendingPermissionStore.denyFirstPending(forSessionId: sessionId)
         }
     }
 

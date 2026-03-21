@@ -52,29 +52,39 @@ final class NotificationStore {
 
     func markAsRead(_ id: UUID) {
         if let index = notifications.firstIndex(where: { $0.id == id }) {
-            notifications[index].isRead = true
-            notifications[index].readAt = Date()
+            var updated = notifications[index]
+            updated.isRead = true
+            updated.readAt = Date()
+            notifications[index] = updated
             schedulePersist()
         }
     }
 
     func updateResolution(_ id: UUID, outcome: ResolutionOutcome) {
         if let index = notifications.firstIndex(where: { $0.id == id }) {
-            notifications[index].resolutionOutcome = outcome
-            notifications[index].resolvedAt = Date()
-            notifications[index].isRead = true
-            notifications[index].readAt = notifications[index].readAt ?? Date()
+            var updated = notifications[index]
+            updated.resolutionOutcome = outcome
+            updated.resolvedAt = Date()
+            updated.isRead = true
+            updated.readAt = updated.readAt ?? Date()
+            notifications[index] = updated
             schedulePersist()
         }
     }
 
     func markAllAsRead() {
         var changed = false
-        for i in notifications.indices where !notifications[i].isRead {
-            notifications[i].isRead = true
-            notifications[i].readAt = Date()
+        let now = Date()
+        let updatedNotifications = notifications.map { notification in
+            guard !notification.isRead else { return notification }
             changed = true
+            var updated = notification
+            updated.isRead = true
+            updated.readAt = now
+            return updated
         }
-        if changed { schedulePersist() }
+        guard changed else { return }
+        notifications = updatedNotifications
+        schedulePersist()
     }
 }

@@ -41,6 +41,7 @@ final class EventProcessor {
                     body: event.message ?? "\(event.assistantDisplayName) needs your approval to proceed",
                     category: .permissionRequest,
                     priority: .urgent,
+                    eventId: event.id,
                     sessionId: event.sessionId
                 )
             case "idle_prompt":
@@ -57,6 +58,7 @@ final class EventProcessor {
                     body: event.message ?? "\(event.assistantDisplayName) needs your input",
                     category: .elicitationDialog,
                     priority: .high,
+                    eventId: event.id,
                     sessionId: event.sessionId
                 )
             default:
@@ -83,6 +85,7 @@ final class EventProcessor {
                 body: body,
                 category: .permissionRequest,
                 priority: .high,
+                eventId: event.id,
                 sessionId: event.sessionId
             )
 

@@ -3,21 +3,13 @@ import SwiftUI
 struct ApprovalRequestView: View {
     @Environment(AppStore.self) var appStore
 
-    var permissionNotifications: [AppNotification] {
-        appStore.notificationStore.notifications.filter {
+    var body: some View {
+        let permissionNotifications = appStore.notificationStore.notifications.filter {
             $0.category == .permissionRequest
         }
-    }
+        let pendingItems = permissionNotifications.filter { $0.resolutionOutcome == .pending }
+        let historyItems = permissionNotifications.filter { $0.resolutionOutcome != .pending }
 
-    var pendingItems: [AppNotification] {
-        permissionNotifications.filter { $0.resolutionOutcome == .pending }
-    }
-
-    var historyItems: [AppNotification] {
-        permissionNotifications.filter { $0.resolutionOutcome != .pending }
-    }
-
-    var body: some View {
         VStack(spacing: 0) {
             if permissionNotifications.isEmpty {
                 VStack(spacing: 12) {
@@ -37,7 +29,7 @@ struct ApprovalRequestView: View {
                 .background(Constants.lightBackground)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
                         // Pending section
                         if !pendingItems.isEmpty {
                             sectionHeader("Pending", count: pendingItems.count)
@@ -137,7 +129,7 @@ private struct ApprovalRow: View {
 
                     if isPending {
                         Button("Dismiss") {
-                            appStore.notificationStore.markAsRead(notification.id)
+                            appStore.dismissApproval(notification: notification)
                         }
                         .buttonStyle(BrandGhostButton(color: Constants.orangePrimary))
                     }
