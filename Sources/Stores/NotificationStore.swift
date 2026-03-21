@@ -77,4 +77,12 @@ final class NotificationStore {
         }
         if changed { schedulePersist() }
     }
+
+    func clearAll() {
+        notifications.removeAll()
+        persistTimer?.invalidate()
+        persistTimer = nil
+        isDirty = false
+        LocalStorage.save(notifications, to: Self.filename)
+    }
 }
