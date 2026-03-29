@@ -31,7 +31,7 @@ struct SessionFinishedToastView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(Color.white)
+            .background(Constants.surfaceWhite)
             .overlay(alignment: .bottom) {
                 GeometryReader { geo in
                     Constants.orangePrimary
@@ -45,7 +45,7 @@ struct SessionFinishedToastView: View {
                 RoundedRectangle(cornerRadius: Constants.cornerRadiusSmall)
                     .stroke(Constants.border, lineWidth: 1)
             )
-            .shadow(color: Constants.cardHoverShadowColor, radius: Constants.cardHoverShadowRadius, x: 0, y: Constants.cardHoverShadowY)
+            .shadow(color: Constants.overlayShadow, radius: 4, x: 0, y: 2)
             .transition(.move(edge: .top).combined(with: .opacity))
             .animation(.easeInOut(duration: 0.25), value: store.current != nil)
             .onAppear {

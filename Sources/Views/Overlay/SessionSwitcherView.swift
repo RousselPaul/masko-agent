@@ -36,12 +36,12 @@ struct SessionSwitcherView: View {
                 Divider()
                 Text("⌘⌘ switch · ⌘↵ focus · esc cancel")
                     .font(.system(size: 8, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.35))
+                    .foregroundStyle(Constants.textMuted)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
             }
             .animation(.easeInOut(duration: 0.15), value: hotkeyManager.isCmdHeld)
-            .background(Color.white)
+            .background(Constants.surfaceWhite)
             .clipShape(RoundedRectangle(cornerRadius: Constants.cornerRadiusSmall))
             .overlay(
                 RoundedRectangle(cornerRadius: Constants.cornerRadiusSmall)

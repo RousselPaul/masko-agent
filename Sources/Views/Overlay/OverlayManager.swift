@@ -308,6 +308,7 @@ final class OverlayManager {
         self.permissionPanel = newPermPanel
         self.isOverlayActive = true
         UserDefaults.standard.set(true, forKey: Self.hasActivatedMascotKey)
+        applyAppearanceToAllPanels()
 
         setupObservers(for: mascotPanel)
         DispatchQueue.main.async { [weak self, weak mascotPanel] in
@@ -325,6 +326,15 @@ final class OverlayManager {
             Task { @MainActor in self?.scheduleHUDReposition() }
         }
         workspaceObservers.append(moveObserver)
+    }
+
+    /// Apply the user's appearance preference to all overlay panels so
+    /// NSColor dynamic providers resolve to the correct light/dark variant.
+    func applyAppearanceToAllPanels() {
+        let appearance = AppearanceMode.current.nsAppearance
+        for p in [panel, statsPanel, permissionPanel, expandedPanel, contextPanel] {
+            p?.appearance = appearance
+        }
     }
 
     /// Recompute aggregate session state and push inputs to the state machine.
@@ -853,6 +863,7 @@ final class OverlayManager {
             onDisable: { [weak self] in self?.disableOverlay() },
             dismiss: { [weak panel] in panel?.dismiss() }
         )
+        panel.appearance = AppearanceMode.current.nsAppearance
         panel.onDismiss = { [weak self] in self?.setDialogPreview(false) }
         panel.showAt(point: point, mascotFrame: self.panel?.frame, with: content)
         self.contextPanel = panel
@@ -949,6 +960,7 @@ final class OverlayManager {
         // Use OverlayPanel so it stays on top across spaces, like the mascot
         let newPanel = OverlayPanel(contentRect: rect)
         newPanel.isMovableByWindowBackground = true
+        newPanel.appearance = AppearanceMode.current.nsAppearance
 
         let permissionId = permission.id
         let view = PermissionContentView(
@@ -1065,7 +1077,7 @@ final class OverlayManager {
                 RoundedRectangle(cornerRadius: Constants.cornerRadiusSmall)
                     .stroke(Constants.border, lineWidth: 1)
             )
-            .shadow(color: Constants.cardShadowColor, radius: 4, x: 0, y: 2)
+            .shadow(color: Constants.overlayShadow, radius: 4, x: 0, y: 2)
 
         let toastPanel = OverlayPanel(contentRect: NSRect(
             x: mascotFrame.midX - 80,
@@ -1074,6 +1086,7 @@ final class OverlayManager {
             height: 32
         ))
         toastPanel.isMovableByWindowBackground = false
+        toastPanel.appearance = AppearanceMode.current.nsAppearance
 
         let controller = TransparentHostingController(rootView: toastView)
         toastPanel.contentView = controller.view

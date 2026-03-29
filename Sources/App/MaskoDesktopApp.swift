@@ -134,6 +134,7 @@ struct MaskoDesktopApp: App {
     @State private var appStore = AppStore()
     @State private var overlayManager = OverlayManager()
     @State private var appUpdater = AppUpdater()
+    @AppStorage("appearanceMode") private var appearanceMode: String = AppearanceMode.system.rawValue
 
     var body: some Scene {
         // Main dashboard window (shown on launch)
@@ -144,7 +145,10 @@ struct MaskoDesktopApp: App {
                 .environment(appUpdater)
                 .environment(ViewClock.shared)
                 .frame(minWidth: 800, minHeight: 500)
-                .preferredColorScheme(.light)
+                .preferredColorScheme(AppearanceMode(rawValue: appearanceMode)?.colorScheme)
+                .onChange(of: appearanceMode) { _, _ in
+                    overlayManager.applyAppearanceToAllPanels()
+                }
                 .task {
                     guard !appStore.isRunning else { return }
                     overlayManager.sessionStore = appStore.sessionStore
@@ -202,6 +206,7 @@ struct MaskoDesktopApp: App {
                 .environment(appStore)
                 .environment(overlayManager)
                 .environment(appUpdater)
+                .preferredColorScheme(AppearanceMode(rawValue: appearanceMode)?.colorScheme)
         } label: {
             if let url = Bundle.module.url(forResource: "logo", withExtension: "png", subdirectory: "Images"),
                let nsImage = NSImage(contentsOf: url) {
@@ -229,6 +234,7 @@ struct MaskoDesktopApp: App {
                 .environment(overlayManager)
                 .environment(appUpdater)
                 .environment(ViewClock.shared)
+                .preferredColorScheme(AppearanceMode(rawValue: appearanceMode)?.colorScheme)
         }
     }
 

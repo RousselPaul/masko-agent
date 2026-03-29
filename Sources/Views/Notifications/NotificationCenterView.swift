@@ -34,6 +34,7 @@ struct NotificationCenterView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .background(Constants.lightBackground)
 
             Divider().overlay(Constants.border)
 
@@ -56,6 +57,7 @@ struct NotificationCenterView: View {
             } else {
                 List(appStore.notificationStore.notifications) { notification in
                     NotificationRow(notification: notification)
+                        .listRowBackground(Constants.lightBackground)
                         .onTapGesture {
                             appStore.notificationStore.markAsRead(notification.id)
                         }

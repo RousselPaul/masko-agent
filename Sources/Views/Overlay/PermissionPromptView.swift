@@ -4,20 +4,20 @@ import AppKit
 // MARK: - Overlay style constants (Speech Bubble + Tight Crisp Shadow)
 
 enum OverlayStyle {
-    static let cardBg = Color.white
-    static let cardShadow = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.22)
-    static let codeBg = Color(red: 250/255, green: 249/255, blue: 247/255)  // #faf9f7
-    static let codeBorder = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.06)
-    static let textPrimary = Color(red: 35/255, green: 17/255, blue: 60/255)
-    static let textMuted = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.55)
-    static let textHint = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.30)
-    static let orange = Color(red: 249/255, green: 93/255, blue: 2/255)
-    static let orangeBorder = Color(red: 249/255, green: 93/255, blue: 2/255).opacity(0.25)
-    static let selectedBg = Color(red: 249/255, green: 93/255, blue: 2/255).opacity(0.06)
-    static let denyBorder = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.12)
-    static let denyText = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.50)
-    static let radioBorder = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.20)
-    static let inputBg = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.04)
+    static let cardBg = Constants.surfaceWhite
+    static let cardShadow = Constants.overlayShadow
+    static let codeBg = Constants.codeBg
+    static let codeBorder = Constants.border
+    static let textPrimary = Constants.textPrimary
+    static let textMuted = Constants.textMuted
+    static let textHint = Constants.border
+    static let orange = Constants.orangePrimary
+    static let orangeBorder = Constants.orangePrimary.opacity(0.25)
+    static let selectedBg = Constants.orangePrimarySubtle
+    static let denyBorder = Constants.border
+    static let denyText = Constants.textMuted
+    static let radioBorder = Constants.borderHover
+    static let inputBg = Constants.stage
 
     static let tailHeight: CGFloat = 8
 }
@@ -401,6 +401,7 @@ struct AskUserQuestionView: View {
         .padding(tailSide.paddingEdge, OverlayStyle.tailHeight)
         .background(OverlayStyle.cardBg)
         .clipShape(SpeechBubbleShape(tailSide: tailSide, tailPercent: tailPercent))
+        .compositingGroup()
         .shadow(color: OverlayStyle.cardShadow, radius: 3, x: 0, y: 2)
         .onChange(of: hotkeyManager.selectedButtonIndex) { _, newIdx in
             guard showShortcuts, let idx = newIdx else { return }
@@ -842,6 +843,7 @@ struct ExitPlanModeView: View {
         .padding(tailSide.paddingEdge, OverlayStyle.tailHeight)
         .background(OverlayStyle.cardBg)
         .clipShape(SpeechBubbleShape(tailSide: tailSide, tailPercent: tailPercent))
+        .compositingGroup()
         .shadow(color: OverlayStyle.cardShadow, radius: 3, x: 0, y: 2)
         .onAppear {
             planContent = permission.planFileContent
@@ -1083,6 +1085,7 @@ struct PermissionPromptView: View {
         .padding(tailSide.paddingEdge, OverlayStyle.tailHeight)
         .background(OverlayStyle.cardBg)
         .clipShape(SpeechBubbleShape(tailSide: tailSide, tailPercent: tailPercent))
+        .compositingGroup()
         .shadow(color: OverlayStyle.cardShadow, radius: 3, x: 0, y: 2)
         .onChange(of: hotkeyManager.confirmTrigger) { _, _ in
             guard showShortcuts else { return }
@@ -1205,6 +1208,7 @@ private struct CollapsedPermissionPill: View {
         .padding(.vertical, 5)
         .background(OverlayStyle.cardBg)
         .clipShape(RoundedRectangle(cornerRadius: 10))
+        .compositingGroup()
         .shadow(color: OverlayStyle.cardShadow, radius: 2, x: 0, y: 1)
         .contentShape(Rectangle())
         .onTapGesture { onExpand() }
@@ -1327,6 +1331,7 @@ struct PermissionStackView: View {
                         .padding(tailSide.paddingEdge, OverlayStyle.tailHeight)
                         .background(OverlayStyle.cardBg)
                         .clipShape(SpeechBubbleShape(tailSide: tailSide, tailPercent: tailPercent))
+                        .compositingGroup()
                         .shadow(color: OverlayStyle.cardShadow, radius: 3, x: 0, y: 2)
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
@@ -1393,6 +1398,7 @@ struct DialogScalePreview: View {
         .padding(tailSide.paddingEdge, OverlayStyle.tailHeight)
         .background(OverlayStyle.cardBg)
         .clipShape(SpeechBubbleShape(tailSide: tailSide, tailPercent: tailPercent))
+        .compositingGroup()
         .shadow(color: OverlayStyle.cardShadow, radius: 3, x: 0, y: 2)
     }
 }

@@ -1,7 +1,46 @@
 import SwiftUI
+import AppKit
 
 extension Notification.Name {
     static let openConnectionDoctor = Notification.Name("openConnectionDoctor")
+}
+
+// MARK: - Appearance Mode
+
+enum AppearanceMode: String, CaseIterable {
+    case system
+    case light
+    case dark
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    /// The NSAppearance corresponding to the user's choice (nil = follow system).
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
+
+    /// Read the current preference from UserDefaults.
+    static var current: AppearanceMode {
+        AppearanceMode(rawValue: UserDefaults.standard.string(forKey: "appearanceMode") ?? "") ?? .system
+    }
 }
 
 enum Constants {
@@ -35,23 +74,97 @@ enum Constants {
         UserDefaults.standard.set(Int(port), forKey: serverPortKey)
     }
 
-    // Brand colors — matches masko.ai web design
-    static let orangePrimary = Color(red: 249/255, green: 93/255, blue: 2/255)     // #f95d02
-    static let orangeHover = Color(red: 251/255, green: 121/255, blue: 16/255)     // #fb7910
-    static let orangeShadow = Color(red: 201/255, green: 74/255, blue: 1/255)      // #c94a01
-    static let textPrimary = Color(red: 35/255, green: 17/255, blue: 60/255)       // #23113c
-    static let textMuted = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.65)
-    static let lightBackground = Color(red: 250/255, green: 249/255, blue: 247/255) // #faf9f7
-    static let surfaceWhite = Color.white
-    static let border = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.12)
-    static let borderHover = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.20)
+    // MARK: - Adaptive Color Helper
 
-    // Interactive state colors (matches website sidebar)
-    static let chip = Color(red: 231/255, green: 173/255, blue: 104/255).opacity(0.18)       // warm hover bg
-    static let stage = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.04)          // subtle hover
-    static let orangePrimaryLight = Color(red: 249/255, green: 93/255, blue: 2/255).opacity(0.10)  // active item bg
-    static let orangePrimarySubtle = Color(red: 249/255, green: 93/255, blue: 2/255).opacity(0.08) // selected row bg
-    static let destructiveRed = Color(.sRGB, red: 220/255, green: 38/255, blue: 38/255)         // #dc2626
+    private static func adaptive(light: NSColor, dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+        }))
+    }
+
+    private static func c(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> NSColor {
+        NSColor(srgbRed: r, green: g, blue: b, alpha: a)
+    }
+
+    // MARK: - Brand Colors (fixed across themes)
+
+    static let orangePrimary = Color(red: 249.0/255, green: 93.0/255, blue: 2.0/255)     // #f95d02
+    static let orangeHover = Color(red: 251.0/255, green: 121.0/255, blue: 16.0/255)     // #fb7910
+    static let orangeShadow = Color(red: 201.0/255, green: 74.0/255, blue: 1.0/255)      // #c94a01
+    static let destructiveRed = Color(.sRGB, red: 220.0/255, green: 38.0/255, blue: 38.0/255) // #dc2626
+
+    // MARK: - Adaptive Theme Colors
+
+    //                          Light                      Dark
+    // lightBackground:         #faf9f7                    #1e1e1e
+    // surfaceWhite:            #ffffff                    #2d2d2d
+    // textPrimary:             #23113c                    #e5e5e5
+    // textMuted:               #23113c @ 0.65             #e5e5e5 @ 0.60
+    // border:                  #23113c @ 0.12             #e5e5e5 @ 0.14
+    // borderHover:             #23113c @ 0.20             #e5e5e5 @ 0.24
+
+    static let textPrimary = adaptive(
+        light: c(0.137, 0.067, 0.235),
+        dark: c(0.898, 0.898, 0.898)
+    )
+    static let textMuted = adaptive(
+        light: c(0.137, 0.067, 0.235, 0.65),
+        dark: c(0.898, 0.898, 0.898, 0.60)
+    )
+    static let lightBackground = adaptive(
+        light: c(0.980, 0.976, 0.969),
+        dark: c(0.118, 0.118, 0.118)
+    )
+    static let surfaceWhite = adaptive(
+        light: .white,
+        dark: c(0.176, 0.176, 0.176)
+    )
+    static let border = adaptive(
+        light: c(0.137, 0.067, 0.235, 0.12),
+        dark: c(1, 1, 1, 0.12)
+    )
+    static let borderHover = adaptive(
+        light: c(0.137, 0.067, 0.235, 0.20),
+        dark: c(1, 1, 1, 0.20)
+    )
+
+    // Overlay shadow (speech bubbles, permission cards — subtle in both modes)
+    static let overlayShadow = adaptive(
+        light: c(0.137, 0.067, 0.235, 0.22),
+        dark: c(0, 0, 0, 0.25)
+    )
+
+    // Code area colors (pre-baked opacity for overlay panels where dynamic opacity may not resolve)
+    static let codeText = adaptive(
+        light: c(0.137, 0.067, 0.235, 0.85),
+        dark: c(0.898, 0.898, 0.898, 0.85)
+    )
+    static let codeTextMuted = adaptive(
+        light: c(0.137, 0.067, 0.235, 0.75),
+        dark: c(0.898, 0.898, 0.898, 0.75)
+    )
+    static let codeBg = adaptive(
+        light: c(0.980, 0.976, 0.969),
+        dark: c(0.145, 0.145, 0.145)
+    )
+
+    // Interactive state colors
+    static let chip = adaptive(
+        light: c(0.906, 0.678, 0.408, 0.18),
+        dark: c(0.906, 0.678, 0.408, 0.15)
+    )
+    static let stage = adaptive(
+        light: c(0.137, 0.067, 0.235, 0.04),
+        dark: c(1, 1, 1, 0.06)
+    )
+    static let orangePrimaryLight = adaptive(
+        light: c(0.976, 0.365, 0.008, 0.10),
+        dark: c(0.976, 0.365, 0.008, 0.18)
+    )
+    static let orangePrimarySubtle = adaptive(
+        light: c(0.976, 0.365, 0.008, 0.08),
+        dark: c(0.976, 0.365, 0.008, 0.14)
+    )
 
     // MARK: - Typography
 
@@ -72,13 +185,17 @@ enum Constants {
 
     // MARK: - Shadows
 
-    /// Default card shadow
-    static let cardShadowColor = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.08)
+    static let cardShadowColor = adaptive(
+        light: c(0.137, 0.067, 0.235, 0.08),
+        dark: c(0, 0, 0, 0.4)
+    )
     static let cardShadowRadius: CGFloat = 1.5
     static let cardShadowY: CGFloat = 1
 
-    /// Hover card shadow
-    static let cardHoverShadowColor = Color(red: 35/255, green: 17/255, blue: 60/255).opacity(0.12)
+    static let cardHoverShadowColor = adaptive(
+        light: c(0.137, 0.067, 0.235, 0.12),
+        dark: c(0, 0, 0, 0.55)
+    )
     static let cardHoverShadowRadius: CGFloat = 6
     static let cardHoverShadowY: CGFloat = 4
 
@@ -87,8 +204,8 @@ enum Constants {
     /// Feature card orange tint gradient (matches web)
     static let featureCardGradient = LinearGradient(
         colors: [
-            Color(red: 249/255, green: 93/255, blue: 2/255).opacity(0.06),
-            Color(red: 252/255, green: 155/255, blue: 43/255).opacity(0.06)
+            Color(red: 249.0/255, green: 93.0/255, blue: 2.0/255).opacity(0.06),
+            Color(red: 252.0/255, green: 155.0/255, blue: 43.0/255).opacity(0.06)
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing

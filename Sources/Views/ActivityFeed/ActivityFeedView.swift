@@ -35,7 +35,7 @@ struct ActivityFeedView: View {
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
-            .background(Constants.surfaceWhite)
+            .background(Constants.lightBackground)
 
             Divider().overlay(Constants.border)
 
@@ -58,6 +58,7 @@ struct ActivityFeedView: View {
             } else {
                 List(filteredEvents) { event in
                     EventRow(event: event)
+                        .listRowBackground(Constants.lightBackground)
                 }
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)

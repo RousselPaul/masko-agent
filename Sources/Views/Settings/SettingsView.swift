@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var installingIDE: String?  // command of IDE currently being installed
     @State private var autoHideDelayText: String = "15"
     @State private var showConnectionDoctor = false
+    @AppStorage("appearanceMode") private var appearanceMode: String = AppearanceMode.system.rawValue
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
@@ -29,6 +30,24 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                HStack {
+                    Text("Theme")
+                        .foregroundColor(Constants.textPrimary)
+                    Spacer()
+                    Picker("", selection: $appearanceMode) {
+                        ForEach(AppearanceMode.allCases, id: \.rawValue) { mode in
+                            Text(mode.label).tag(mode.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 200)
+                }
+            } header: {
+                Text("Appearance").font(Constants.heading(size: 13, weight: .semibold))
+            }
+
             Section {
                 HStack {
                     Text("Assistant Events")
