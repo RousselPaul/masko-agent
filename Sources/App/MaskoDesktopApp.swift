@@ -146,8 +146,22 @@ struct MaskoDesktopApp: App {
                 .environment(ViewClock.shared)
                 .frame(minWidth: 800, minHeight: 500)
                 .preferredColorScheme(AppearanceMode(rawValue: appearanceMode)?.colorScheme)
-                .onChange(of: appearanceMode) { _, _ in
+                .onChange(of: appearanceMode) { _, newValue in
                     overlayManager.applyAppearanceToAllPanels()
+                    // Force all windows to pick up the new appearance immediately.
+                    // Setting NSApp.appearance forces a global re-evaluation,
+                    // then resetting to nil lets "system" mode follow the OS again.
+                    let mode = AppearanceMode(rawValue: newValue) ?? .system
+                    if mode == .system {
+                        // Briefly set to current system appearance, then clear to follow OS
+                        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                        NSApp.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+                        DispatchQueue.main.async {
+                            NSApp.appearance = nil
+                        }
+                    } else {
+                        NSApp.appearance = mode.nsAppearance
+                    }
                 }
                 .task {
                     guard !appStore.isRunning else { return }
