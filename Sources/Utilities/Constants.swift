@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 extension Notification.Name {
     static let openConnectionDoctor = Notification.Name("openConnectionDoctor")
@@ -84,6 +85,7 @@ enum Constants {
         light: .white,
         dark: nsColor(0.176, 0.176, 0.176)
     )
+    static let textHint = adaptive(light: primaryLight(0.30), dark: primaryDark(0.30))
     static let border = adaptive(light: primaryLight(0.12), dark: primaryDark(0.12))
     static let borderHover = adaptive(light: primaryLight(0.20), dark: primaryDark(0.20))
 

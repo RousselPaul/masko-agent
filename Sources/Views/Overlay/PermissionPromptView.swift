@@ -10,7 +10,7 @@ enum OverlayStyle {
     static let codeBorder = Constants.border
     static let textPrimary = Constants.textPrimary
     static let textMuted = Constants.textMuted
-    static let textHint = Constants.border
+    static let textHint = Constants.textHint
     static let orange = Constants.orangePrimary
     static let orangeBorder = Constants.orangePrimary.opacity(0.25)
     static let selectedBg = Constants.orangePrimarySubtle
