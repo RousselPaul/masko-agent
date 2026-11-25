@@ -117,12 +117,12 @@ Click a session in the dashboard or click the mascot overlay to jump to the righ
 
 ### Install
 
-Download the latest `.dmg` from [**Releases**](https://github.com/RousselPaul/masko-agent/releases/latest).
+Download the latest `.dmg` from [**Releases**](https://github.com/masko-ai/masko-agent/releases/latest).
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/RousselPaul/masko-agent.git
+git clone https://github.com/masko-ai/masko-agent.git
 cd masko-agent
 swift build
 swift run
