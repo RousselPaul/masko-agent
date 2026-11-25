@@ -2,44 +2,57 @@
   <img src="Sources/Resources/Images/app-icon.png" width="128" />
 </p>
 
-<h1 align="center">Masko Code</h1>
+<h1 align="center">Masko Agent</h1>
 
 <p align="center">
-  A living mascot that floats above your windows, reacts to Claude Code and Codex, and lets you handle everything without leaving your flow.
+  A mascot on your screen that your AI agent installs, drives and changes for you.
 </p>
 
 <p align="center">
-  <a href="https://github.com/RousselPaul/masko-code/releases/latest"><img src="https://img.shields.io/github/v/release/RousselPaul/masko-code?style=flat-square&color=f95d02" alt="Release" /></a>
+  <img src="https://img.shields.io/badge/status-work%20in%20progress-f95d02?style=flat-square" alt="Work in progress" />
   <img src="https://img.shields.io/badge/macOS-14.0%2B-black?style=flat-square&logo=apple" alt="macOS 14+" />
-  <img src="https://img.shields.io/badge/Universal-arm64%20%2B%20x86__64-black?style=flat-square" alt="Universal Binary" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License" />
-</p>
-
-<p align="center">
-  <a href="https://github.com/RousselPaul/masko-code/releases/latest"><strong>Download</strong></a> · <a href="https://masko.ai/claude-code"><strong>Website</strong></a> · <a href="https://masko.ai"><strong>Custom Mascots</strong></a>
 </p>
 
 ---
 
-<!-- Add a screenshot or GIF here: ![Screenshot](docs/screenshot.png) -->
+## Where this comes from
 
-## Features
+This repository started in March 2026 as **Masko Code**: a mascot that floats above your windows, reacts to Claude Code and Codex, and lets you approve permissions and answer questions without going back to the terminal. Thanks to everyone who contributed to it.
+
+It is now becoming **Masko Agent**. The code you see today is still the March 2026 version (v0.13). The new version is being built here, in the open.
+
+## What Masko Agent will do
+
+- **Your agent installs it.** One command, run by Claude Code, Codex or Cursor. No window to set up.
+- **It shows what your agent is doing.** Each kind of tool gets its own state: the mascot works on the database when the agent uses Supabase, handles money when it uses Stripe, ships when it pushes to GitHub.
+- **Your agent can talk to you through it.** A small local MCP gives the agent `ask_user` and `tell_user`, so you can answer from the mascot when you are away from the terminal.
+- **Your agent changes the mascot.** Ask it for a new character and it makes one with the [Masko MCP](https://masko.ai) and puts it on your screen.
+- **It works with the agents you use.** Claude Code, Codex, Cursor, Hermes, OpenCode, and more over time.
+
+Star or watch the repository to follow along.
+
+## The March 2026 version (Masko Code)
+
+The rest of this page describes the code as it is today. It calls Masko services as they were in March 2026, so some parts may no longer work.
+
+### Features
 
 | | Feature | Description |
 |---|---|---|
-| 🎭 | **Animated overlay** | A mascot that floats above all windows and reacts to Claude Code + Codex state — click or hover to interact |
-| 🔐 | **Permission handling** | Approve, deny, or defer tool use requests from a speech bubble — select with `⌘1-9`, permissions stack in a queue |
+| 🎭 | **Animated overlay** | A mascot that floats above all windows and reacts to Claude Code + Codex state: click or hover to interact |
+| 🔐 | **Permission handling** | Approve, deny, or defer tool use requests from a speech bubble: select with `⌘1-9`, permissions stack in a queue |
 | 💬 | **Question answering** | Answer Claude's questions directly from the overlay |
 | 📋 | **Plan review** | Review and approve plans without opening your terminal |
 | 📊 | **Session tracking** | Monitor active sessions, subagents, and status at a glance |
 | 🔔 | **Notification dashboard** | Priority levels, resolution tracking, color-coded activity feed |
-| 🖥️ | **Find the right terminal** | Jump to the correct terminal tab — supports 13 terminals and IDEs including iTerm2, Ghostty, VS Code, Cursor, and more |
+| 🖥️ | **Find the right terminal** | Jump to the correct terminal tab: supports 13 terminals and IDEs including iTerm2, Ghostty, VS Code, Cursor, and more |
 | 🔀 | **Session switcher** | Double-tap `⌘` to switch between assistant sessions |
 | 😴 | **Snooze** | Right-click to hide the mascot for 15 min, 1 hour, or indefinitely |
 | ↔️ | **Resizable** | Drag to resize or pick a preset (S / M / L / XL) from the context menu |
-| 🔄 | **Auto-updates** | Built-in Sparkle updates — always on the latest version |
+| 🔄 | **Auto-updates** | Built-in Sparkle updates: always on the latest version |
 
-## How It Works
+### How It Works
 
 ```
 ┌─────────────┐     hook events     ┌─────────────┐
@@ -54,14 +67,14 @@
    ~/.claude/settings.json          local HTTP :49152
 ```
 
-1. **Download the app** — Install the DMG. Lives in your menu bar, no dock clutter.
-2. **Grant accessibility** — First launch installs Claude Code hooks automatically into `~/.claude/settings.json`.
-3. **Pick a mascot** — Choose the default Masko or bring your own from [masko.ai](https://masko.ai).
-4. **Start coding** — Open Claude Code or Codex (CLI/Desktop). Your mascot springs to life.
+1. **Download the app**: Install the DMG. Lives in your menu bar, no dock clutter.
+2. **Grant accessibility**: First launch installs Claude Code hooks automatically into `~/.claude/settings.json`.
+3. **Pick a mascot**: Choose the default Masko or bring your own from [masko.ai](https://masko.ai).
+4. **Start coding**: Open Claude Code or Codex (CLI/Desktop). Your mascot springs to life.
 
-## Keyboard Shortcuts
+### Keyboard Shortcuts
 
-All shortcuts work globally — no need to focus the app.
+All shortcuts work globally: no need to focus the app.
 
 | Shortcut | Action |
 |---|---|
@@ -78,13 +91,13 @@ All shortcuts work globally — no need to focus the app.
 
 The focus toggle shortcut can be rebound to any key combination in Settings.
 
-Right-click the mascot to open the **context menu** — snooze, resize, or close the overlay.
+Right-click the mascot to open the **context menu**: snooze, resize, or close the overlay.
 
-## Custom Mascots
+### Custom Mascots
 
 The default Masko fox is included. Want your own character? Create one on [masko.ai](https://masko.ai) with AI-generated animations for every state (idle, working, attention). Export and load it into the desktop app in one click.
 
-## Supported Terminals & IDEs
+### Supported Terminals & IDEs
 
 Masko works with terminals that run Claude Code or Codex. Terminal focus (`⌘M`) support varies by app:
 
@@ -96,26 +109,26 @@ Masko works with terminals that run Claude Code or Codex. Terminal focus (`⌘M`
 
 Click a session in the dashboard or click the mascot overlay to jump to the right terminal.
 
-## Requirements
+### Requirements
 
 - macOS 14.0+ (Sonoma)
 - Apple Silicon or Intel Mac
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and/or [Codex CLI](https://github.com/openai/codex) installed
 
-## Install
+### Install
 
-Download the latest `.dmg` from [**Releases**](https://github.com/RousselPaul/masko-code/releases/latest).
+Download the latest `.dmg` from [**Releases**](https://github.com/RousselPaul/masko-agent/releases/latest).
 
-## Build from Source
+### Build from Source
 
 ```bash
-git clone https://github.com/RousselPaul/masko-code.git
-cd masko-code
+git clone https://github.com/RousselPaul/masko-agent.git
+cd masko-agent
 swift build
 swift run
 ```
 
-## Local Codex Smoke Test
+### Local Codex Smoke Test
 
 Boot Masko from source in one terminal:
 
@@ -142,7 +155,7 @@ The automated mode verifies that Masko ingests:
 
 The automated mode drives Codex through its own PTY and verifies Masko ingestion. Use `--manual` if you want to inspect the overlay yourself while the prompts are live.
 
-## Project Structure
+### Project Structure
 
 ```
 Sources/
@@ -161,11 +174,11 @@ extensions/
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get involved.
+See [CONTRIBUTING.md](CONTRIBUTING.md). New integrations with coding agents are especially welcome.
 
 ## License
 
-[MIT License](LICENSE) — Copyright (c) 2026 Masko.
+[MIT License](LICENSE). Copyright (c) 2026 Masko.
 
 ---
 
